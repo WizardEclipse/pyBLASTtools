@@ -34,7 +34,12 @@ class timing():
         Function to generate ctime for the master file
         '''
 
-        self.d = gd.dirfile(self.master_path)
+        if write:
+            mode_dirfile = gd.RDWR
+        else:
+            mode_dirfile = gd.RDONLY
+
+        self.d = gd.dirfile(self.master_path, mode_dirfile)
         self.time_master = (self.d.getdata('time')).astype(float)
         time_usec = (self.d.getdata('time_usec')).astype(float)
 
