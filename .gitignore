@@ -1,0 +1,8 @@
+# Folder to ignore
+dist/
+build/
+pyBLASTtools/__pycache__/
+
+#Extensions to ignore
+*.egg-info
+*.pyc
