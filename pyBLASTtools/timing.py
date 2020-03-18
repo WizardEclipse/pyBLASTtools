@@ -2,6 +2,7 @@ import numpy as np
 import pygetdata as gd
 import glob as gl
 from itertools import compress
+from scipy import interpolate
 import sys
 
 class Error(Exception):
@@ -27,18 +28,23 @@ class timing():
         self.roach_path = list(compress(list_file, ['roach' in s for s in list_file]))
         self.master_path = list_file['master' in list_file]
     
-    def ctime_master(self):
+    def ctime_master(self, write=False):
 
         '''
         Function to generate ctime for the master file
         '''
 
-        d = gd.dirfile(self.master_path)
-        self.time_master = (d.getdata('time')).astype(float)
-        time_usec = (d.getdata('time_usec')).astype(float)
+        self.d = gd.dirfile(self.master_path)
+        self.time_master = (self.d.getdata('time')).astype(float)
+        time_usec = (self.d.getdata('time_usec')).astype(float)
 
         self.time_master += time_usec/1.e6
 
+        if write:
+
+            self.write_ctime()
+
+        self.d.close()
     
     def ctime_roach(self, roach_number, kind, mode='average', write=False):
 
@@ -380,17 +386,176 @@ class timing():
 
         return time
 
-    def write_ctime(self, roach_number):
+    def write_ctime(self, roach_number = None):
 
-        ctime_name = 'ctime_built_roach'+str(int(roach_number))
-        key = 'roach'+str(int(roach_number))
+        if roach_number is not None:
+            ctime_name = 'ctime_built_roach'+str(int(roach_number))
+            key = 'roach'+str(int(roach_number))
+            val = self.time_roach[key]
+        else:
+            ctime_name = 'ctime_master_built'
+            val = self.time_master
 
         if ctime_name in list(map(bytes.decode, self.d.field_list())):
             pass
         else:
             ctime_entry = gd.entry(gd.RAW_ENTRY, ctime_name, 0, (gd.FLOAT64, 1))
             self.d.add(ctime_entry)
-        self.d.putdata(ctime_name, self.time_roach[key], gd.FLOAT64)
+        self.d.putdata(ctime_name, val , gd.FLOAT64)
+
+class dirfile_interp():
+
+    '''
+    Class to interpolate the data between two different sampling data sources.
+    This class is considering the the ctime for the master and the roach has been built.
+    '''
+
+    def __init__(self, loading_method, path_master=None, path_roach=None, roach_num=1, idx_start=0, idx_end=-1, \
+                 time_start=None, time_end=None, time_master=None, time_roach=None):
+
+        '''
+        Input parameters for interpolating the data:
+        loading_method: a string between:
+                        - idx: Using two indices on the master file to select the data
+                        - time_val: Using two time values on the master file to select at the data
+                        - time_array: using two time arrays, one from master and one from the roach as 
+                                      reference
+        path_master: path of the master file
+        path_roach: path of the roach file
+        roach_num: which roach is going to be analyzed
+        idx_start: Starting index of the data that need to be analyzed. The index is from the 
+                   master file 
+        idx_end: Ending index of the data that need to be analyzed. The index is from the 
+                 master file
+        time_start: Starting time of the data that need to be analyzed. The time is from the 
+                    master file. The array needs to be already sliced 
+        time_end: Ending time of the data that need to be analyzed. The time is from the 
+                  master file. The array needs to be already sliced
+        time_master: Array with the time data from master file
+        time_roach: Array with the time data from one of the roach file
+        '''
+
+        loading_method_list = ['idx', 'time_val', 'time_array']
+
+        try:
+            if loading_method.strip().lower() in loading_method_list:
+                pass
+            else:
+                raise InputError
+        except InputError:
+            print('The loading method choosen is not correct. Choose between: idx, time_val, time_array')
+            sys.exit(1)
+
+        if loading_method.strip().lower() == 'time_array':
+
+            self.time_master = time_master
+            self.time_roach = time_roach
+
+        else:
+
+            self.d_master = gd.dirfile(path_master)
+            self.d_roach = gd.dirfile(path_roach)
+
+            self.roach_num = roach_num
+
+            if loading_method.strip().lower() == 'idx':
+                
+                num_frames = idx_end-idx_start
+                self.time_master = self.d_master.getdata('ctime_master_built', first_frame=idx_start, \
+                                                         num_frames=num_frames)
+
+                self.idx_start_master = idx_start
+                self.idx_end_master = idx_end
+
+            elif loading_method.strip().lower() == 'time_val':
+
+                self.time_master = self.d_master.getdata('ctime_master_built')
+
+                self.idx_start_master, = np.where(np.abs(self.time_master-time_start) == \
+                                                  np.amin(np.abs(self.time_roach-time_start)))
+                self.idx_end_master, = np.where(np.abs(self.time_master-time_end) == \
+                                                np.amin(np.abs(self.time_master-time_end)))
+
+                self.time_master = self.time_master[self.idx_start_master:self.idx_end_master]
+
+            roach_time_str = 'ctime_built_roach'+str(int(self.roach_num))
+
+            self.time_roach = self.d_roach.getdata(roach_time_str)
+
+            self.idx_start_roach, = np.where(np.abs(self.time_roach-self.time_master[0]) == \
+                                             np.amin(np.abs(self.time_roach-self.time_master[0])))
+            self.idx_end_roach, = np.where(np.abs(self.time_roach-self.time_master[-1]) == \
+                                           np.amin(np.abs(self.time_roach-self.time_master[-1])))
+
+            self.time_roach = self.time_roach[self.idx_start_roach:self.idx_end_roach]
+                
+    def interp(self, field_master, field_roach, direction='mtr', interpolation_type='linear'):
+
+        '''
+        Method for loading the data from the dirfile and then calling the interpolation method
+        List of variables:
+        - field_master: a string with the field coming from master
+        - field_roach: a string with the field 
+        - direction: the direction of the interpolation
+                     - mtr: interpolating master to roach
+                     - rtm: interpolating roach to master 
+        - interpolation_type: which kind of interpolation to be used. Standard scipy.interp1d values
+        '''
+        
+        field_master_array = self.d_master.getdata(field_master, first_frame=self.idx_start_master, \
+                                                   num_frames=self.idx_end_master-self.idx_start_master)
+
+        field_roach_array = self.d_roach.getdata(field_roach, first_frame=self.idx_start_roach, \
+                                                 num_frames=self.idx_end_roach-self.idx_start_roach)
+
+
+        field_master, field_roach = self.interpolate(field_master_array, field_roach_array, \
+                                                     direction=direction, interpolation_type=interpolation_type)
+
+        return field_master, field_roach
+
+    def interpolate(self, master_array, roach_array, direction='mtr', interpolation_type='linear'):
+
+        '''
+        Method for interpolating the data.
+        List of variables:
+        - master_array: array with the data coming from master
+        - roach_array: array with the data coming from roach
+        - direction: the direction of the interpolation
+                     - mtr: interpolating master to roach
+                     - rtm: interpolating roach to master 
+        - interpolation_type: which kind of interpolation to be used. Standard scipy.interp1d values
+        '''
+
+        try: 
+            if direction in ['mtr', 'rtm']:
+                pass
+            else:
+                raise InputError
+
+        except InputError:
+            print('The direction choosen for the interpolation is not correct. Choose between mtr and rtm')
+            sys.exit(1)
+
+        if direction == 'rtm':
+
+            f = interpolate.interp1d(self.time_roach, roach_array, kind=interpolation_type, \
+                                     fill_value='extrapolate')
+
+            return master_array, f(self.time_master)
+        
+        elif direction == 'mtr':
+
+            f = interpolate.interp1d(self.time_master, master_array, kind=interpolation_type, \
+                                     fill_value='extrapolate')
+            
+            return f(self.time_roach), roach_array
+
+        
+
+        
+
+        
 
 
 
