@@ -416,7 +416,7 @@ class dirfile_interp():
     '''
 
     def __init__(self, loading_method, path_master=None, path_roach=None, roach_num=1, idx_start=0, idx_end=-1, \
-                 time_start=None, time_end=None, time_master=None, time_roach=None):
+                 time_start=None, time_end=None, time_master=None, time_roach=None, offset=0.):
 
         '''
         Input parameters for interpolating the data:
@@ -438,6 +438,10 @@ class dirfile_interp():
                   master file. The array needs to be already sliced
         time_master: Array with the time data from master file
         time_roach: Array with the time data from one of the roach file
+        offset: time offset in seconds of the roach time array with respect to the master time.
+                This is defined as the time to be added (or subctrated if negative) to the master time. 
+                This offset is not applied in case it is used the 'time_array' option for loading
+                the time arrays.
         '''
 
         loading_method_list = ['idx', 'time_val', 'time_array']
@@ -487,10 +491,10 @@ class dirfile_interp():
 
             self.time_roach = self.d_roach.getdata(roach_time_str)
 
-            self.idx_start_roach, = np.where(np.abs(self.time_roach-self.time_master[0]) == \
-                                             np.amin(np.abs(self.time_roach-self.time_master[0])))
-            self.idx_end_roach, = np.where(np.abs(self.time_roach-self.time_master[-1]) == \
-                                           np.amin(np.abs(self.time_roach-self.time_master[-1])))
+            self.idx_start_roach, = np.where(np.abs(self.time_roach-self.time_master[0]-offset) == \
+                                             np.amin(np.abs(self.time_roach-self.time_master[0]-offset)))
+            self.idx_end_roach, = np.where(np.abs(self.time_roach-self.time_master[-1]-offset) == \
+                                           np.amin(np.abs(self.time_roach-self.time_master[-1]-offset)))
 
             self.time_roach = self.time_roach[self.idx_start_roach:self.idx_end_roach]
                 
