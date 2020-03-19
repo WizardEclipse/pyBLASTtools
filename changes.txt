@@ -1,3 +1,4 @@
 v0.0.1: Create ctime for roach and master data
 v0.1: Added interpolation functions 
 v0.2: Added pointing functions and offset options in interpolation
+v0.3: Added basic detectors functions

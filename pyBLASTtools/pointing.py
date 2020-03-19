@@ -2,7 +2,7 @@ import numpy as np
 import gc
 from astropy import wcs
 
-import src.quaternion as quat
+import pyBLASTtools.quaternion as quat
 
 class utils(object):
 
