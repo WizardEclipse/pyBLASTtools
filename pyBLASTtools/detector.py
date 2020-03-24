@@ -86,8 +86,6 @@ class despike():
         y_std = np.std(self.data)
         y_mean = np.mean(self.data)
 
-        print('MEAN and STD', y_mean, y_std)
-
         if np.amin(self.data) > 0:
             data_to_despike = self.data-y_mean
         else:
@@ -124,10 +122,14 @@ class despike():
         redge = np.array([], dtype='int')
 
         for i in range(len(peaks)):
-            left_edge, = np.where(np.abs(data_to_despike[peaks[i]-window:peaks[i]]) == \
-                                  np.amin(np.abs(data_to_despike[peaks[i]-window:peaks[i]])))
-            right_edge, = np.where(np.abs(data_to_despike[peaks[i]:peaks[i]+window]) == \
-                                   np.amin(np.abs(data_to_despike[peaks[i]:peaks[i]+window])))
+            try:
+                left_edge, = np.where(np.abs(data_to_despike[peaks[i]-window:peaks[i]]) == \
+                                      np.amin(np.abs(data_to_despike[peaks[i]-window:peaks[i]])))
+                right_edge, = np.where(np.abs(data_to_despike[peaks[i]:peaks[i]+window]) == \
+                                       np.amin(np.abs(data_to_despike[peaks[i]:peaks[i]+window])))
+            except ValueError:
+                left_edge = 0
+                right_edge = 0
 
             left_edge += (peaks[i]-window)
             right_edge += peaks[i]
