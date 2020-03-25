@@ -7,3 +7,5 @@ v0.4: Added mapmaker code
 v0.4.5: Solved a bug for loading data from master with different spf than the ctime
         Solved a bug in creating ctime_master. Now, it is created with the same spf than the original fields
         Added an option to interpolate data starting from roach indices 
+v0.4.6: Solved multiples bugs
+        Changed the function to resample data from scipy.signal.resample to use interpolation

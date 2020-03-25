@@ -480,20 +480,22 @@ class dirfile_interp():
 
                 self.time_roach = self.time_roach[self.idx_start_roach:self.idx_end_roach]
 
-                self.time_master = self.d_master('ctime_master_built')
+                self.time_master = self.d_master.getdata('ctime_master_built')
 
                 self.idx_start_master = np.nanargmin(np.abs(self.time_master-self.time_roach[0]+offset))
                 self.idx_end_master = np.nanargmin(np.abs(self.time_master-self.time_roach[-1]+offset))
+                
+                self.time_master = self.time_master[self.idx_start_master:self.idx_end_master]
 
             else:
                 if loading_method.strip().lower() == 'idx':
 
                     self.time_master = self.d_master.getdata('ctime_master_built')
 
-                    self.time_master = self.time_master[self.idx_start_master:self.idx_end_master]
-
                     self.idx_start_master = idx_start
                     self.idx_end_master = idx_end
+
+                    self.time_master = self.time_master[self.idx_start_master:self.idx_end_master]
 
                 elif loading_method.strip().lower() == 'time_val':
 
@@ -508,7 +510,8 @@ class dirfile_interp():
 
                 self.idx_start_roach = np.nanargmin(np.abs(self.time_roach-self.time_master[0]-offset))
                 self.idx_end_roach = np.nanargmin(np.abs(self.time_roach-self.time_master[-1]-offset))
-
+                print('IDXs', self.idx_start_roach, self.idx_end_roach)
+                print('IDXs', self.idx_start_master, self.idx_end_master)
                 self.time_roach = self.time_roach[self.idx_start_roach:self.idx_end_roach]
                 
     def interp(self, field_master, field_roach, direction='mtr', interpolation_type='linear'):
@@ -536,8 +539,13 @@ class dirfile_interp():
         field_master_array = self.d_master.getdata(field_master)
         field_master_array = field_master_array[idx_start_master_temp:idx_end_master_temp]
 
-        if spf_field != spf_ctime:
-            field_master_array = signal.resample(field_master_array, len(self.time_master))
+        if len(field_master_array) != len(self.time_master):
+
+            x_axis = np.arange(len(field_master_array))/(spf_field/spf_ctime)
+
+            f = interpolate.interp1d(x_axis, field_master_array, kind='linear')
+            field_master_array = f(np.arange(len(self.time_master)))
+
             assert len(field_master_array) == len(self.time_master)
  
         field_roach_array = self.d_roach.getdata(field_roach, first_frame=self.idx_start_roach, \
