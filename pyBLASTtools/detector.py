@@ -72,36 +72,39 @@ class despike():
 
         self.data = data
 
-    def findpeak(self, hthres=5, pthres=0):
+    def findpeak(self, thresh=5, hthres=5, pthres=None, width=np.array([1, 10])):
 
         '''
-        This function finds the peak in the TOD.
-        hthresh and pthres are measured in how many std the height (or the prominence) 
-        of the peak is computed. The height of the peak is computed with respect to 
-        the mean of the signal        
-        '''
+        This function finds the peak in the TOD. The optional arguments are the standard 
+        from scipy.signal.find_peaks
 
-        index = np.ones(1)
+        hthresh, pthres and thresh are measured in how many std the height, the prominence 
+        or the threshold (distance from its neighbouring samples) of the peak is computed. 
+        The height of the peak is computed with respect to the mean of the signal        
+        '''
 
         y_std = np.std(self.data)
         y_mean = np.mean(self.data)
-
         if np.amin(self.data) > 0:
             data_to_despike = self.data-y_mean
         else:
             data_to_despike = self.data.copy()
 
-        if hthres != 0 and pthres == 0:
-            index, param = sgn.find_peaks(np.abs(data_to_despike), height = hthres*y_std, distance=100)
-        elif pthres != 0 and hthres == 0:
-            index, param = sgn.find_peaks(np.abs(data_to_despike), prominence = pthres*y_std)
-        elif hthres != 0 and pthres != 0:
-            index, param = sgn.find_peaks(np.abs(data_to_despike), height = hthres*y_std, \
-                                          prominence = pthres*y_std)
+        if hthres is not None:
+            hthres = hthres*y_std
+        if pthres is not None:
+            pthres = pthres*y_std
+        if thresh is not None:
+            thresh = thresh*y_std
+        if width is not None:
+            width = width
+
+        index, param = sgn.find_peaks(np.abs(data_to_despike), height = hthres, prominence = pthres, \
+                                      threshold = thresh, width=width)
 
         return index
 
-    def peak_width(self, peaks, hthres=5, pthres=0, window = 100):
+    def peak_width(self, peaks, thres=5, hthres=5, pthres=0, window = 100):
 
 
         '''
@@ -139,7 +142,7 @@ class despike():
 
         return param[0].copy(), ledge, redge
 
-    def replace_peak(self, hthres=5, pthres = 5, peaks = np.array([]), widths = np.array([])):
+    def replace_peak(self, thres=5, hthres=5, pthres=None, peaks = np.array([]), widths = np.array([0, 10])):
 
         '''
         This function replaces the spikes data with noise realization. Noise can be gaussian
@@ -153,9 +156,23 @@ class despike():
         replaced = self.data.copy()
 
         if np.size(peaks) == 0:
-            peaks = self.findpeak(hthres=hthres, pthres=pthres)
+            peaks = self.findpeak(threshold=thres, hthres=hthres, pthres=pthres)
+        
         if np.size(widths) == 0:
-            widths = self.peak_width(peaks=peaks, hthres=hthres, pthres=pthres)
+            widths = self.peak_width(peaks=peaks, threshold=thres, hthres=hthres, pthres=pthres)
+        else:
+            widths_param = np.zeros_like((3, peaks))
+            widths_param[0][:] = np.ones_like(peaks)*np.amax(widths)
+            widths_param[1][:] = np.ones_like(peaks)*peaks-np.amax(widths)
+
+            if peaks[-1]+np.amax(widths) < len(self.data):
+                widths_param[2][:] = np.ones_like(peaks)*peaks+np.amax(widths)
+            else:
+                for j in range(len(peaks)):
+                    if peaks[j]+np.amax(widths) > len(self.data):
+                        widths_param[2][j] = len(self.data)-1
+                    else:
+                        widths_param[2][j] = peaks[j]+np.amax(widths)
 
         for i in range(0, len(peaks)):
 

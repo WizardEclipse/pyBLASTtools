@@ -177,7 +177,6 @@ class apply_offset(object):
 
                 xEL_offset, EL_offset, roll_offset = quaternion.quat2eul(off_quat)
 
-
                 # Verify if the signs are still the same as BLASTPol
                 xEL_corrected_temp = xEL-xEL_offset
                 EL_corrected_temp = el+EL_offset
@@ -270,7 +269,7 @@ class compute_offset(object):
         x_c = np.sum(xx*weight*self.map_data)/flux
         y_c = np.sum(yy*weight*self.map_data)/flux
 
-        return np.rint(x_c), np.rint(y_c)
+        return x_c, y_c
     
     def value(self):
 
@@ -278,8 +277,8 @@ class compute_offset(object):
         x_c, y_c = self.centroid()
                
         if self.ctype.lower() == 'ra and dec':
-            map_center = wcs.utils.pixel_to_skycoord(x_c, y_c, self.wcs_trans)
-
+            map_center = wcs.utils.pixel_to_skycoord(np.rint(x_c), np.rint(y_c), self.wcs_trans)
+            
             x_map = map_center.ra.hour
             y_map = map_center.dec.degree
 
@@ -308,8 +307,6 @@ class compute_offset(object):
         xel_ref = az_ref*np.cos(np.radians(el_ref))
 
         return xel_centr-xel_ref, el_ref+el_centr
-
-
 
 
         

@@ -9,3 +9,5 @@ v0.4.5: Solved a bug for loading data from master with different spf than the ct
         Added an option to interpolate data starting from roach indices 
 v0.4.6: Solved multiples bugs
         Changed the function to resample data from scipy.signal.resample to use interpolation
+v1.0: Reorganization of the mapmaker and pointing libraries
+      Modified peak finder code with more functionalities to select peaks 

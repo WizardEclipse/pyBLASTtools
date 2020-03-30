@@ -2,125 +2,26 @@ import numpy as np
 from astropy import wcs
 from astropy.convolution import Gaussian2DKernel, convolve
 
-class maps():
-
-    '''
-    Wrapper class for the wcs_word class and the mapmaking class.
-    In this way in the gui.py only one class is called
-    '''
-
-    def __init__(self, ctype, crpix, cdelt, crval, data, coord1, coord2, convolution, std, Ionly=True, pol_angle=0.,noise=1., \
-                 telcoord=False, parang=None):
-
-        self.ctype = ctype             #see wcs_world for explanation of this parameter
-        self.crpix = crpix             #see wcs_world for explanation of this parameter
-        self.cdelt = cdelt             #see wcs_world for explanation of this parameter
-        self.crval = crval             #see wcs_world for explanation of this parameter
-        self.coord1 = coord1           #array of the first coordinate
-        self.coord2 = coord2           #array of the second coordinate
-        self.data = data               #cleaned TOD that is used to create a map
-        self.w = 0.                    #initialization of the coordinates of the map in pixel coordinates
-        self.proj = 0.                 #inizialization of the wcs of the map. see wcs_world for more explanation about projections
-        self.convolution = convolution #parameters to check if the convolution is required
-        self.std = float(std)          #std of the gaussian is the convolution is required
-        self.Ionly = Ionly             #paramters to check if only I is required to be computed
-        self.pol_angle = pol_angle     #polariztion angle
-        self.noise = noise             #white level noise of detector(s)
-        self.telcoord = telcoord       #If True the map is drawn in telescope coordinates. That means that the projected plane is rotated
-        if parang is not None:
-            self.parang = np.radians(parang)   #Parallactic Angle. This is used to compute the pixel indices in telescopes coordinates
-        else:
-            self.parang = parang
-
-    def wcs_proj(self):
-
-        '''
-        Function to compute the projection and the pixel coordinates
-        '''
-        wcsworld = wcs_world(self.ctype, self.crpix, self.cdelt, self.crval, self.telcoord)
-
-        if np.size(np.shape(self.data)) == 1:
-
-            if np.size(np.shape(self.coord1)) != 1:
-                coord_array = np.transpose(np.array([self.coord1[0], self.coord2[0]]))
-            else:
-                coord_array = np.transpose(np.array([self.coord1, self.coord2]))
-            try:
-                self.w, self.proj = wcsworld.world(coord_array, self.parang)
-            except RuntimeError:
-                self.w, self.proj = wcsworld.world(coord_array, self.parang)
-        else:
-            if np.size(np.shape(self.coord1)) == 1:
-                self.w, self.proj = wcsworld.world(np.transpose(np.array([self.coord1, self.coord2])), self.parang[0,:])
-            else:
-                self.w = np.zeros((np.size(np.shape(self.data)), len(self.coord1[0]), 2))
-                for i in range(np.size(np.shape(self.data))):
-                    self.w[i,:,:], self.proj = wcsworld.world(np.transpose(np.array([self.coord1[i], self.coord2[i]])), self.parang[i,:])
-
-    def map2d(self):
-
-        '''
-        Function to generate the maps using the pixel coordinates to bin
-        '''
-
-        if np.size(np.shape(self.data)) == 1:
-            mapmaker = mapmaking(self.data, self.noise, self.pol_angle, 1, np.floor(self.w).astype(int))
-            if self.Ionly:
-                Imap = mapmaker.map_singledetector_Ionly(self.crpix)
-
-                if not self.convolution:
-                    return Imap
-                else:
-                    std_pixel = self.std/3600./np.abs(self.cdelt[0])
-                    
-                    return mapmaker.convolution(std_pixel, Imap)
-            else:        
-                Imap, Qmap, Umap = mapmaker.map_singledetector(self.crpix)
-                if not self.convolution:
-                    return Imap, Qmap, Umap
-                else:
-                    Imap_con = mapmaker.convolution(self.std, Imap)
-                    Qmap_con = mapmaker.convolution(self.std, Qmap)
-                    Umap_con = mapmaker.convolution(self.std, Umap)
-                    return Imap_con, Qmap_con, Umap_con
-
-        else:
-            mapmaker = mapmaking(self.data, self.noise, self.pol_angle, np.size(np.shape(self.data)), np.floor(self.w).astype(int))
-            if self.Ionly:
-                Imap = mapmaker.map_multidetectors_Ionly(self.crpix)
-
-                if not self.convolution:
-                    return Imap
-                else:
-                    std_pixel = self.std/3600./self.cdelt[0]
-                    
-                    return mapmaker.convolution(std_pixel, Imap)
-            else:        
-                Imap, Qmap, Umap = mapmaker.map_multidetectors(self.crpix)
-                if not self.convolution:
-                    return Imap, Qmap, Umap
-                else:
-                    Imap_con = mapmaker.convolution(self.std, Imap)
-                    Qmap_con = mapmaker.convolution(self.std, Qmap)
-                    Umap_con = mapmaker.convolution(self.std, Umap)
-                    return Imap_con, Qmap_con, Umap_con
-
-
 class wcs_world():
 
     '''
     Class to generate a wcs using astropy routines.
     '''
 
-    def __init__(self, ctype, crpix, crdelt, crval, telcoord=False):
+    def __init__(self, coord1, coord2, ctype, crpix, crdelt, crval, radesys, equinox, parang = 0, telcoord=False):
 
-        self.ctype = ctype    #ctype of the map, which projection is used to convert coordinates to pixel numbers
-        self.crdelt = crdelt  #cdelt of the map, distance in deg between two close pixels
-        self.crpix = crpix    #crpix of the map, central pixel of the map in pixel coordinates
-        self.crval = crval    #crval of the map, central pixel of the map in sky/telescope (depending on the system) coordinates
-        self.telcoord = telcoord #Telescope coordinates boolean value. Check map class for more explanation
+        self.coord1 = coord1        #Array with the value of the first coordinate
+        self.coord2 = coord2        #Array with the value of the second coordinate
+        self.ctype = ctype          #ctype of the map, which projection is used to convert coordinates to pixel numbers
+        self.crdelt = crdelt        #cdelt of the map, distance in deg between two close pixels
+        self.crpix = crpix          #crpix of the map, central pixel of the map in pixel coordinates
+        self.crval = crval          #crval of the map, central pixel of the map in sky/telescope (depending on the system) coordinates
+        self.radesys = radesys      #Frame of the observation
+        self.equinox = equinox      #Time of the observation
+        self.parang = parang        #Parallactic Angle
+        self.telcoord = telcoord    #Telescope coordinates boolean value. Check map class for more explanation
 
-    def world(self, coord, parang):
+    def world(self, coord, pang):
         
         '''
         Function for creating a wcs projection and a pixel coordinates 
@@ -131,6 +32,8 @@ class wcs_world():
         w.wcs.crpix = self.crpix
         w.wcs.cdelt = self.crdelt
         w.wcs.crval = self.crval
+        w.wcs.radesys = self.radesys
+        w.wcs.equinox = self.equinox
 
         if self.telcoord is False:
             if self.ctype == 'XY Stage':
@@ -149,6 +52,7 @@ class wcs_world():
                     w.wcs.ctype = ["TLON-ARC", "TLAT-ARC"]
                 elif self.ctype == 'CROSS-EL and EL':
                     w.wcs.ctype = ["TLON-CAR", "TLAT-CAR"]
+                
                 world = w.all_world2pix(coord, 1)
 
         else:
@@ -156,10 +60,51 @@ class wcs_world():
             world = np.zeros_like(coord)
             px = w.wcs.s2p(coord, 1)
             #Use the parallactic angle to rotate the projected plane
-            world[:,0] = (px['imgcrd'][:,0]*np.cos(parang)-px['imgcrd'][:,1]*np.sin(parang))/self.crdelt[0]+self.crpix[0]
-            world[:,1] = (px['imgcrd'][:,0]*np.sin(parang)+px['imgcrd'][:,1]*np.cos(parang))/self.crdelt[1]+self.crpix[1]
-        
+            world[:,0] = ((px['imgcrd'][:,0]*np.cos(pang)-px['imgcrd'][:,1]*np.sin(pang))\
+                          /self.crdelt[0]+self.crpix[0])
+            world[:,1] = ((px['imgcrd'][:,0]*np.sin(pang)+px['imgcrd'][:,1]*np.cos(pang))\
+                          /self.crdelt[1]+self.crpix[1])
+
         return world, w
+
+    def wcs_proj(self, det_num):
+
+        '''
+        Function to compute the projection and the pixel coordinates
+        '''
+
+        if det_num == 1:
+
+            if np.size(np.shape(self.coord1)) != 1:
+                coord = np.transpose(np.array([self.coord1[0], self.coord2[0]]))
+            else:
+                coord = np.transpose(np.array([self.coord1, self.coord2]))
+
+            self.w, self.proj = self.world(coord, self.parang)
+
+        else:
+            if np.size(np.shape(self.coord1)) == 1:
+                coord = np.transpose(np.array([self.coord1, self.coord2]))
+                self.w, self.proj = self.world(self.parang[0,:])
+            else:
+                self.w = np.zeros((np.size(np.shape(self.data)), len(self.coord1[0]), 2))
+                for i in range(np.size(np.shape(self.data))):
+                    coord = np.transpose(np.array([self.coord1[i], self.coord2[i]]))
+                    self.w[i,:,:], self.proj = self.world(coord, self.parang[i,:])
+
+
+    def reproject(self, world_original, proj_original):
+
+        x_min_map = np.floor(np.amin(world_original[:,0]))
+        y_min_map = np.floor(np.amin(world_original[:,1]))
+
+        crpix_new = proj_original.wcs.crpix+np.array([x_min_map, y_min_map])
+
+        crval_new = proj_original.all_pix2world(crpix_new[0], crpix_new[1], 1)
+
+        proj_original.wcs.crval = crval_new
+
+        return proj_original
 
 class mapmaking(object):
 
@@ -168,13 +113,66 @@ class mapmaking(object):
     check Moncelsi et al. 2012
     '''
 
-    def __init__(self, data, weight, polangle, number, pixelmap):
+    def __init__(self, data, weight, polangle, pixelmap, crpix, Ionly=True, number=1, \
+                 convolution=False, std=0., cdelt=0.):
 
         self.data = data               #detector TOD
         self.weight = weight           #weights associated with the detector values
         self.polangle = polangle       #polarization angles of each detector
         self.number = number           #Number of detectors to be mapped
-        self.pixelmap = pixelmap       #Coordinates of each point in the TOD in pixel coordinates
+        self.pixelmap = np.floor(pixelmap).astype(int)       #Coordinates of each point in the TOD in pixel coordinates
+        self.crpix = crpix             #Coordinates of central point 
+        self.Ionly = Ionly             #Choose if a map only in Intensity
+        self.convolution = False       #If true a map is convolved with a gaussian
+        self.std = std                 #Standard deviation of the gaussian for the convolution
+        self.cdelt = cdelt             #Pixel size of the map. This is used to compute the std in pixels
+
+    def map2d(self):
+
+        '''
+        Function to generate the maps using the pixel coordinates to bin
+        '''
+
+        if np.size(np.shape(self.data)) == 1:
+
+            if self.Ionly:
+                Imap = self.map_singledetector_Ionly(self.crpix)
+
+                if not self.convolution:
+                    return Imap
+                else:
+                    std_pixel = self.std/3600./np.abs(self.cdelt[0])
+                    
+                    return self.convolution(std_pixel, Imap)
+            else:        
+                Imap, Qmap, Umap = self.map_singledetector(self.crpix)
+                if not self.convolution:
+                    return Imap, Qmap, Umap
+                else:
+                    Imap_con = self.convolution(self.std, Imap)
+                    Qmap_con = self.convolution(self.std, Qmap)
+                    Umap_con = self.convolution(self.std, Umap)
+                    return Imap_con, Qmap_con, Umap_con
+
+        else:
+            if self.Ionly:
+                Imap = self.map_multidetectors_Ionly(self.crpix)
+
+                if not self.convolution:
+                    return Imap
+                else:
+                    std_pixel = self.std/3600./self.cdelt[0]
+                    
+                    return self.convolution(std_pixel, Imap)
+            else:        
+                Imap, Qmap, Umap = self.map_multidetectors(self.crpix)
+                if not self.convolution:
+                    return Imap, Qmap, Umap
+                else:
+                    Imap_con = self.convolution(self.std, Imap)
+                    Qmap_con = self.convolution(self.std, Qmap)
+                    Umap_con = self.convolution(self.std, Umap)
+                    return Imap_con, Qmap_con, Umap_con
 
     def map_param(self, crpix, idxpixel, value=None, noise=None, angle=None):
 
@@ -303,13 +301,11 @@ class mapmaking(object):
         finalmap_den = np.zeros((int(np.abs(Ymax-Ymin)+1), int(np.abs(Xmax-Xmin)+1)))
 
         for i in range(self.number):
-            print('Det #', i)
+
             if np.size(np.shape(self.pixelmap)) == 2:
                 idxpixel = self.pixelmap.copy()
             else:
                 idxpixel = self.pixelmap[i].copy()
-            # mapvalues = self.map_singledetector_Ionly(crpix = crpix, value=self.data[i],noise=1/self.weight[i],\
-            #                                           angle=self.polangle[i], idxpixel = idxpixel)
 
             value = self.map_param(crpix=crpix, idxpixel = idxpixel, value=self.data[i], noise=1/self.weight[i], angle=self.polangle[i])
 
@@ -402,7 +398,6 @@ class mapmaking(object):
             U_pixel_flat = np.append(U_pixel_flat, U_fin)
 
         ind_pol, = np.nonzero(Q_pixel_flat)
-        #pol = np.sqrt(Q_pixel_flat**2+U_pixel_flat**2)
 
         I_pixel = np.reshape(I_pixel_flat, (y_len+1,x_len+1))
         Q_pixel = np.reshape(Q_pixel_flat, (y_len+1,x_len+1))
@@ -529,7 +524,6 @@ class mapmaking(object):
                              F[index]*finalmap_U_est[index])/Delta[index]
 
         return finalmap_I, finalmap_Q, finalmap_U
-
 
     def convolution(self, std, map_value):
 

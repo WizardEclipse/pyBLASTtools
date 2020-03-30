@@ -4,7 +4,6 @@ import glob as gl
 from itertools import compress
 from scipy import interpolate
 import sys
-from scipy import signal
 
 class Error(Exception):
     """Base class for exceptions in this module."""
