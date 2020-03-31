@@ -174,7 +174,10 @@ class timing():
             for j in range(np.size(kind)):
 
                 if np.size(kind) == 1:
-                    kind_temp = kind
+                    if isinstance(kind, list):
+                        kind_temp = kind[j]
+                    else:    
+                        kind_temp = kind
                 else:
                     kind_temp = kind[j]
 
@@ -183,12 +186,6 @@ class timing():
 
                 elif kind_temp.lower() == 'packet':
                     ctime_temp = self.packet_ctime_roach(roach_number_temp)
-
-                elif kind_temp.lower() == 'ppsclock':
-                    ctime_temp = self.ppsclock_ctime_roach(roach_number_temp)
-                
-                elif kind_temp.lower() == 'ppspacket':
-                    ctime_temp = self.ppspacket_ctime_roach(roach_number_temp)
                 
                 ctime_temp += 1570000000.
                 ctime_temp += self.ctime_roach_temp*1e-2
