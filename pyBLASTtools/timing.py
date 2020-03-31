@@ -151,9 +151,9 @@ class timing():
 
         for i in range(np.size(roach_number)):
 
-            
             if np.size(roach_number) == 1:
-                if isinstance(roach_number, list):
+
+                if isinstance(roach_number, np.ndarray):
                     roach_number_temp = roach_number[0]
                     key = 'roach'+str(roach_number[0])
                 else:
