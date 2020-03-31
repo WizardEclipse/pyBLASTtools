@@ -153,8 +153,12 @@ class timing():
 
             
             if np.size(roach_number) == 1:
-                roach_number_temp = roach_number
-                key = 'roach'+str(roach_number)
+                if isinstance(roach_number, list):
+                    roach_number_temp = roach_number[0]
+                    key = 'roach'+str(roach_number[0])
+                else:
+                    roach_number_temp = roach_number
+                    key = 'roach'+str(roach_number)
             else:
                 roach_number_temp = roach_number[i]
                 key = 'roach'+str(roach_number[i])
