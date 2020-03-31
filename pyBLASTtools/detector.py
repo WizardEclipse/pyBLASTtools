@@ -85,10 +85,8 @@ class despike():
 
         y_std = np.std(self.data)
         y_mean = np.mean(self.data)
-        if np.amin(self.data) > 0:
-            data_to_despike = self.data-y_mean
-        else:
-            data_to_despike = self.data.copy()
+        
+        data_to_despike = self.data-y_mean
 
         if hthres is not None:
             hthres = hthres*y_std

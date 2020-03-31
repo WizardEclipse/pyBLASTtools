@@ -50,17 +50,21 @@ class utils(object):
             if hour_angle<0:
                 hour_angle +=2*np.pi
 
-        el = np.arcsin(np.sin(self.coord2)*np.sin(self.lat)+\
-                       np.cos(self.lat)*np.cos(self.coord2)*np.cos(hour_angle))
+        x = - np.cos(hour_angle)*np.cos(self.coord2)*np.sin(self.lat)+np.sin(self.coord2)*np.cos(self.lat)
+        y = - np.sin(hour_angle)*np.cos(self.coord2)
+        z = np.cos(hour_angle)*np.cos(self.coord2)*np.cos(self.lat)+np.sin(self.coord2)*np.sin(self.lat)
+        r = np.sqrt(x**2 + y**2)
 
-        az = np.arccos((np.sin(self.coord2)-np.sin(self.lat)*np.sin(el))/(np.cos(self.lat)*np.cos(el)))
+        az = np.arctan2(y,x) 
+        el = np.arctan2(z,r) 
 
         if isinstance(az, np.ndarray):
-            index, = np.where(np.sin(hour_angle)>0)
-            az[index] = 2*np.pi - az[index]
+            index, = np.where(az<0)
+            az[index] += 2*np.pi
         else:
-            if np.sin(hour_angle)>0 :
-                az = 2*np.pi - az
+            if az<0 :
+                az += 2*np.pi
+        
         return np.degrees(az), np.degrees(el)
 
     def azel2radec(self):
@@ -69,19 +73,30 @@ class utils(object):
         Function to convert AZ and EL to RA and DEC
         '''
 
+        az = np.radians(self.coord1)
+
+        hour_angle = np.arctan2(-np.sin(az)*np.cos(self.coord2), \
+                                (-np.cos(az)*np.sin(self.lat)*np.cos(self.coord2)+\
+                                np.sin(self.coord2)*np.cos(self.lat)))
+
         dec = np.arcsin(np.sin(self.coord2)*np.sin(self.lat)+\
                         np.cos(self.lat)*np.cos(self.coord2)*np.cos(np.radians(self.coord1)))
 
-
-        hour_angle = np.arccos((np.sin(self.coord2)-np.sin(self.lat)*np.sin(dec))/(np.cos(self.lat)*np.cos(dec)))
-
-        index, = np.where(np.sin(np.radians(self.coord1)) > 0)
-        hour_angle[index] = 2*np.pi - hour_angle[index]
+        if isinstance(hour_angle,np.float):
+            if hour_angle < 0:
+                hour_angle += 2*np.pi
+        else:
+            index, = np.where(hour_angle<0)
+            hour_angle[index] += 2*np.pi
 
         ra = self.ha2ra(np.degrees(hour_angle)/15.)*15.
 
-        index, = np.where(ra<0)
-        ra[index] += 360.
+        if isinstance(ra, np.float):
+            if ra <0:
+                ra += 360.
+        else:
+            index, = np.where(ra<0)
+            ra[index] += 360.
 
         return ra, np.degrees(dec)
 

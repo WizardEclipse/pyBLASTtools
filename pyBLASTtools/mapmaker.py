@@ -123,7 +123,7 @@ class mapmaking(object):
         self.pixelmap = np.floor(pixelmap).astype(int)       #Coordinates of each point in the TOD in pixel coordinates
         self.crpix = crpix             #Coordinates of central point 
         self.Ionly = Ionly             #Choose if a map only in Intensity
-        self.convolution = False       #If true a map is convolved with a gaussian
+        self.convolution = convolution       #If true a map is convolved with a gaussian
         self.std = std                 #Standard deviation of the gaussian for the convolution
         self.cdelt = cdelt             #Pixel size of the map. This is used to compute the std in pixels
 
@@ -143,15 +143,15 @@ class mapmaking(object):
                 else:
                     std_pixel = self.std/3600./np.abs(self.cdelt[0])
                     
-                    return self.convolution(std_pixel, Imap)
+                    return self.map_convolve(std_pixel, Imap)
             else:        
                 Imap, Qmap, Umap = self.map_singledetector(self.crpix)
                 if not self.convolution:
                     return Imap, Qmap, Umap
                 else:
-                    Imap_con = self.convolution(self.std, Imap)
-                    Qmap_con = self.convolution(self.std, Qmap)
-                    Umap_con = self.convolution(self.std, Umap)
+                    Imap_con = self.map_convolve(self.std, Imap)
+                    Qmap_con = self.map_convolve(self.std, Qmap)
+                    Umap_con = self.map_convolve(self.std, Umap)
                     return Imap_con, Qmap_con, Umap_con
 
         else:
@@ -525,7 +525,7 @@ class mapmaking(object):
 
         return finalmap_I, finalmap_Q, finalmap_U
 
-    def convolution(self, std, map_value):
+    def map_convolve(self, std, map_value):
 
         '''
         Function to convolve the maps with a gaussian.

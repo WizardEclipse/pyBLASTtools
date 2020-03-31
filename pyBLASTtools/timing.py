@@ -509,8 +509,7 @@ class dirfile_interp():
 
                 self.idx_start_roach = np.nanargmin(np.abs(self.time_roach-self.time_master[0]-offset))
                 self.idx_end_roach = np.nanargmin(np.abs(self.time_roach-self.time_master[-1]-offset))
-                print('IDXs', self.idx_start_roach, self.idx_end_roach)
-                print('IDXs', self.idx_start_master, self.idx_end_master)
+
                 self.time_roach = self.time_roach[self.idx_start_roach:self.idx_end_roach]
                 
     def interp(self, field_master, field_roach, direction='mtr', interpolation_type='linear'):
@@ -531,21 +530,13 @@ class dirfile_interp():
 
         spf_ctime = self.d_master.spf('ctime_master_built')
         spf_field = self.d_master.spf(field_master)
+
+        if spf_ctime != spf_field:
+            field_master_array = self.master_to_100(field_master, spf_field, spf_ctime)
         
-        idx_start_master_temp = int(np.floor(self.idx_start_master*spf_field/spf_ctime))
-        idx_end_master_temp = int(np.floor(self.idx_end_master*spf_field/spf_ctime))
-
-        field_master_array = self.d_master.getdata(field_master)
-        field_master_array = field_master_array[idx_start_master_temp:idx_end_master_temp]
-
-        if len(field_master_array) != len(self.time_master):
-
-            x_axis = np.arange(len(field_master_array))/(spf_field/spf_ctime)
-
-            f = interpolate.interp1d(x_axis, field_master_array, kind='linear')
-            field_master_array = f(np.arange(len(self.time_master)))
-
-            assert len(field_master_array) == len(self.time_master)
+        else:
+            field_master_array = self.d_master.getdata(field_master)
+            field_master_array = field_master_array[self.idx_start_master:self.idx_end_master]
  
         field_roach_array = self.d_roach.getdata(field_roach, first_frame=self.idx_start_roach, \
                                                  num_frames=int(self.idx_end_roach-self.idx_start_roach))
@@ -554,6 +545,34 @@ class dirfile_interp():
                                                      direction=direction, interpolation_type=interpolation_type)
 
         return field_master, field_roach
+
+    def master_to_100(self, field_master, spf_field=None, spf_ctime=None):
+
+        '''
+        Function to convert master fields from a certain sampling frequency to 100 Hz.
+        This function return only the sliced array 
+        '''
+
+        if spf_field is None:
+            spf_field = self.d_master.spf(field_master)
+
+        if spf_ctime is None:
+            spf_ctime = self.d_master.spf('ctime_master_built')
+
+        idx_start_master_temp = int(np.floor(self.idx_start_master*spf_field/spf_ctime))
+        idx_end_master_temp = int(np.floor(self.idx_end_master*spf_field/spf_ctime))
+        
+        field_master_array = self.d_master.getdata(field_master)
+        field_master_array = field_master_array[idx_start_master_temp:idx_end_master_temp]
+
+        x_axis = np.arange(len(field_master_array))/(spf_field/spf_ctime)
+
+        f = interpolate.interp1d(x_axis, field_master_array, kind='linear', fill_value='extrapolate')
+        field_master_array = f(np.arange(len(self.time_master)))
+
+        assert len(field_master_array) == len(self.time_master)
+
+        return field_master_array
 
     def interpolate(self, master_array, roach_array, direction='mtr', interpolation_type='linear'):
 

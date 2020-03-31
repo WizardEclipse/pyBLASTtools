@@ -11,3 +11,5 @@ v0.4.6: Solved multiples bugs
         Changed the function to resample data from scipy.signal.resample to use interpolation
 v1.0: Reorganization of the mapmaker and pointing libraries
       Modified peak finder code with more functionalities to select peaks 
+      Added separate function to convert to 100 Hz
+      Change the functions to convert to equatorial or horizontal coordinates
