@@ -21,12 +21,21 @@ fs  = 488.28125 # Sampling frequency for the roaches
 
 class timing():
 
-    def __init__(self, path):
+    def __init__(self, path=None, master_path=None, roach_path=None):
 
-        list_file = gl.glob(path+'/*') #Path of the folder with the different dirfiles
+        if path is not None:
+            list_file = gl.glob(path+'/*') #Path of the folder with the different dirfiles
+            
+            self.roach_path = list(compress(list_file, ['roach' in s for s in list_file]))
+            self.master_path = list_file['master' in list_file]
         
-        self.roach_path = list(compress(list_file, ['roach' in s for s in list_file]))
-        self.master_path = list_file['master' in list_file]
+        if master_path is not None:
+            self.master_path = master_path
+        if roach_path is not None:
+            if isinstance(roach_path, list):
+                self.roach_path = roach_path
+            else:
+                self.roach_path = [roach_path]
     
     def ctime_master(self, write=False):
 
