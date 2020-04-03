@@ -4,6 +4,7 @@ import glob as gl
 from itertools import compress
 from scipy import interpolate
 import sys
+from scipy import signal
 
 class Error(Exception):
     """Base class for exceptions in this module."""
@@ -47,7 +48,7 @@ class timing():
 
         if write:
 
-            self.write_ctime()
+            self.write_ctime(spf=self.d.spf('time'))
 
         self.d.close()
     
@@ -391,7 +392,7 @@ class timing():
 
         return time
 
-    def write_ctime(self, roach_number = None):
+    def write_ctime(self, roach_number = None, spf=1):
 
         if roach_number is not None:
             ctime_name = 'ctime_built_roach'+str(int(roach_number))
@@ -404,7 +405,7 @@ class timing():
         if ctime_name in list(map(bytes.decode, self.d.field_list())):
             pass
         else:
-            ctime_entry = gd.entry(gd.RAW_ENTRY, ctime_name, 0, (gd.FLOAT64, 1))
+            ctime_entry = gd.entry(gd.RAW_ENTRY, ctime_name, 0, (gd.FLOAT64, spf))
             self.d.add(ctime_entry)
         self.d.putdata(ctime_name, val , gd.FLOAT64)
 
@@ -422,6 +423,7 @@ class dirfile_interp():
         Input parameters for interpolating the data:
         loading_method: a string between:
                         - idx: Using two indices on the master file to select the data
+                        - idx_roach: Using two indices of the roach file to select data
                         - time_val: Using two time values on the master file to select at the data
                         - time_array: using two time arrays, one from master and one from the roach as 
                                       reference
@@ -429,9 +431,11 @@ class dirfile_interp():
         path_roach: path of the roach file
         roach_num: which roach is going to be analyzed
         idx_start: Starting index of the data that need to be analyzed. The index is from the 
-                   master file 
+                   master file if the loading method is 'idx' and is from the roach file if the 
+                   loading method is 'idx_roach'
         idx_end: Ending index of the data that need to be analyzed. The index is from the 
-                 master file
+                 master file if the loading method is 'idx' and is from the roach file if the 
+                 loading method is 'idx_roach'
         time_start: Starting time of the data that need to be analyzed. The time is from the 
                     master file. The array needs to be already sliced 
         time_end: Ending time of the data that need to be analyzed. The time is from the 
@@ -444,7 +448,7 @@ class dirfile_interp():
                 the time arrays.
         '''
 
-        loading_method_list = ['idx', 'time_val', 'time_array']
+        loading_method_list = ['idx', 'idx_roach', 'time_val', 'time_array']
 
         try:
             if loading_method.strip().lower() in loading_method_list:
@@ -466,37 +470,49 @@ class dirfile_interp():
             self.d_roach = gd.dirfile(path_roach)
 
             self.roach_num = roach_num
+            roach_time_str = 'ctime_built_roach'+str(int(self.roach_num))
 
-            if loading_method.strip().lower() == 'idx':
-                
-                num_frames = idx_end-idx_start
-                self.time_master = self.d_master.getdata('ctime_master_built', first_frame=idx_start, \
-                                                         num_frames=num_frames)
+            if loading_method.strip().lower() == 'idx_roach':
+                self.time_roach = self.d_roach.getdata(roach_time_str)
 
-                self.idx_start_master = idx_start
-                self.idx_end_master = idx_end
+                self.idx_start_roach = idx_start
+                self.idx_end_roach = idx_end
 
-            elif loading_method.strip().lower() == 'time_val':
+                self.time_roach = self.time_roach[self.idx_start_roach:self.idx_end_roach]
 
                 self.time_master = self.d_master.getdata('ctime_master_built')
 
-                self.idx_start_master, = np.where(np.abs(self.time_master-time_start) == \
-                                                  np.amin(np.abs(self.time_roach-time_start)))
-                self.idx_end_master, = np.where(np.abs(self.time_master-time_end) == \
-                                                np.amin(np.abs(self.time_master-time_end)))
-
+                self.idx_start_master = np.nanargmin(np.abs(self.time_master-self.time_roach[0]+offset))
+                self.idx_end_master = np.nanargmin(np.abs(self.time_master-self.time_roach[-1]+offset))
+                
                 self.time_master = self.time_master[self.idx_start_master:self.idx_end_master]
 
-            roach_time_str = 'ctime_built_roach'+str(int(self.roach_num))
+            else:
+                if loading_method.strip().lower() == 'idx':
 
-            self.time_roach = self.d_roach.getdata(roach_time_str)
+                    self.time_master = self.d_master.getdata('ctime_master_built')
 
-            self.idx_start_roach, = np.where(np.abs(self.time_roach-self.time_master[0]-offset) == \
-                                             np.amin(np.abs(self.time_roach-self.time_master[0]-offset)))
-            self.idx_end_roach, = np.where(np.abs(self.time_roach-self.time_master[-1]-offset) == \
-                                           np.amin(np.abs(self.time_roach-self.time_master[-1]-offset)))
+                    self.idx_start_master = idx_start
+                    self.idx_end_master = idx_end
 
-            self.time_roach = self.time_roach[self.idx_start_roach:self.idx_end_roach]
+                    self.time_master = self.time_master[self.idx_start_master:self.idx_end_master]
+
+                elif loading_method.strip().lower() == 'time_val':
+
+                    self.time_master = self.d_master.getdata('ctime_master_built')
+
+                    self.idx_start_master = np.nanargmin(np.abs(self.time_master-time_start))
+                    self.idx_end_master = np.nanargmin(np.abs(self.time_master-time_end))
+
+                    self.time_master = self.time_master[self.idx_start_master:self.idx_end_master]
+
+                self.time_roach = self.d_roach.getdata(roach_time_str)
+
+                self.idx_start_roach = np.nanargmin(np.abs(self.time_roach-self.time_master[0]-offset))
+                self.idx_end_roach = np.nanargmin(np.abs(self.time_roach-self.time_master[-1]-offset))
+                print('IDXs', self.idx_start_roach, self.idx_end_roach)
+                print('IDXs', self.idx_start_master, self.idx_end_master)
+                self.time_roach = self.time_roach[self.idx_start_roach:self.idx_end_roach]
                 
     def interp(self, field_master, field_roach, direction='mtr', interpolation_type='linear'):
 
@@ -510,13 +526,30 @@ class dirfile_interp():
                      - rtm: interpolating roach to master 
         - interpolation_type: which kind of interpolation to be used. Standard scipy.interp1d values
         '''
+
+        #On master every field has a different number of sample per frame
+        #The index on the time needs to be shifted to take into consideration the different spf
+
+        spf_ctime = self.d_master.spf('ctime_master_built')
+        spf_field = self.d_master.spf(field_master)
         
-        field_master_array = self.d_master.getdata(field_master, first_frame=self.idx_start_master, \
-                                                   num_frames=self.idx_end_master-self.idx_start_master)
+        idx_start_master_temp = int(np.floor(self.idx_start_master*spf_field/spf_ctime))
+        idx_end_master_temp = int(np.floor(self.idx_end_master*spf_field/spf_ctime))
 
+        field_master_array = self.d_master.getdata(field_master)
+        field_master_array = field_master_array[idx_start_master_temp:idx_end_master_temp]
+
+        if len(field_master_array) != len(self.time_master):
+
+            x_axis = np.arange(len(field_master_array))/(spf_field/spf_ctime)
+
+            f = interpolate.interp1d(x_axis, field_master_array, kind='linear')
+            field_master_array = f(np.arange(len(self.time_master)))
+
+            assert len(field_master_array) == len(self.time_master)
+ 
         field_roach_array = self.d_roach.getdata(field_roach, first_frame=self.idx_start_roach, \
-                                                 num_frames=self.idx_end_roach-self.idx_start_roach)
-
+                                                 num_frames=int(self.idx_end_roach-self.idx_start_roach))
 
         field_master, field_roach = self.interpolate(field_master_array, field_roach_array, \
                                                      direction=direction, interpolation_type=interpolation_type)
