@@ -495,6 +495,7 @@ class dirfile_interp():
                 self.idx_end_master = np.nanargmin(np.abs(self.time_master-self.time_roach[-1]+offset))
                 
                 self.time_master = self.time_master[self.idx_start_master:self.idx_end_master]
+                self.time_master += offset
 
             else:
                 if loading_method.strip().lower() == 'idx':
@@ -521,6 +522,10 @@ class dirfile_interp():
                 self.idx_end_roach = np.nanargmin(np.abs(self.time_roach-self.time_master[-1]-offset))
 
                 self.time_roach = self.time_roach[self.idx_start_roach:self.idx_end_roach]
+                self.time_roach -= offset
+
+            self.d_master.flush('ctime_master_built')
+            self.d_roach.flush(roach_time_str)
                 
     def interp(self, field_master, field_roach, direction='mtr', interpolation_type='linear'):
 
@@ -551,10 +556,14 @@ class dirfile_interp():
         field_roach_array = self.d_roach.getdata(field_roach, first_frame=self.idx_start_roach, \
                                                  num_frames=int(self.idx_end_roach-self.idx_start_roach))
 
-        field_master, field_roach = self.interpolate(field_master_array, field_roach_array, \
-                                                     direction=direction, interpolation_type=interpolation_type)
+        field_master_int, field_roach_int = self.interpolate(field_master_array, field_roach_array, \
+                                                             direction=direction,\
+                                                             interpolation_type=interpolation_type)
 
-        return field_master, field_roach
+        self.d_master.flush(field_master)
+        self.d_roach.flush(field_roach)
+
+        return field_master_int, field_roach_int
 
     def master_to_100(self, field_master, spf_field=None, spf_ctime=None):
 

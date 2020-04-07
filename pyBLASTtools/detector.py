@@ -1,5 +1,14 @@
 import numpy as np
 import scipy.signal as sgn
+import sys
+
+class Error(Exception):
+    """Base class for exceptions in this module."""
+    pass
+
+class InputError(Error):
+    """Exception raised for errors in the input. """
+    pass
 
 class data_cleaned():
 
@@ -72,7 +81,7 @@ class despike():
 
         self.data = data
 
-    def findpeak(self, thresh=5, hthres=5, pthres=None, width=np.array([1, 10])):
+    def findpeak(self, thres=5, hthres=5, pthres=None, width=np.array([1, 10])):
 
         '''
         This function finds the peak in the TOD. The optional arguments are the standard 
@@ -92,8 +101,8 @@ class despike():
             hthres = hthres*y_std
         if pthres is not None:
             pthres = pthres*y_std
-        if thresh is not None:
-            thresh = thresh*y_std
+        if thres is not None:
+            thresh = thres*y_std
         if width is not None:
             width = width
 
@@ -145,6 +154,8 @@ class despike():
         '''
         This function replaces the spikes data with noise realization. Noise can be gaussian
         or poissonian based on the statistic of the data
+        - widths may be a 1D array with 2 values (the minimum expect width and the maximum expected width) or 
+          None. In this case the width will be computed automatically by the code
         '''
 
         x_inter = np.array([], dtype = 'int')
@@ -154,34 +165,30 @@ class despike():
         replaced = self.data.copy()
 
         if np.size(peaks) == 0:
-            peaks = self.findpeak(threshold=thres, hthres=hthres, pthres=pthres)
+            peaks = self.findpeak(thres=thres, hthres=hthres, pthres=pthres)
         
-        if np.size(widths) == 0:
-            widths = self.peak_width(peaks=peaks, threshold=thres, hthres=hthres, pthres=pthres)
+        if isinstance(widths, np.ndarray) is False:
+            widths, ledge, redge = self.peak_width(peaks=peaks, thres=thres, hthres=hthres, pthres=pthres)
         else:
-            widths_param = np.zeros_like((3, peaks))
-            widths_param[0][:] = np.ones_like(peaks)*np.amax(widths)
-            widths_param[1][:] = np.ones_like(peaks)*peaks-np.amax(widths)
+            ledge = np.ones_like(peaks)*peaks-np.amax(widths)
 
             if peaks[-1]+np.amax(widths) < len(self.data):
-                widths_param[2][:] = np.ones_like(peaks)*peaks+np.amax(widths)
+                redge = np.ones_like(peaks)*peaks+np.amax(widths)
             else:
                 for j in range(len(peaks)):
                     if peaks[j]+np.amax(widths) > len(self.data):
-                        widths_param[2][j] = len(self.data)-1
+                        redge = len(self.data)-1
                     else:
-                        widths_param[2][j] = peaks[j]+np.amax(widths)
+                        redge = peaks[j]+np.amax(widths)
+
+            ledge = np.floor(ledge).astype(int)
+            redge = np.floor(redge).astype(int)
 
         for i in range(0, len(peaks)):
 
-            left_edge = int(np.floor(widths[1][i]))
-            right_edge = int(np.ceil(widths[2][i]))
-            ledge = np.append(ledge, left_edge)
-            redge = np.append(redge, right_edge)
-
-            x_inter = np.append(x_inter, np.arange(left_edge, right_edge))
-            replaced[left_edge:right_edge] = (replaced[left_edge]+\
-                                              replaced[right_edge])/2.
+            x_inter = np.append(x_inter, np.arange(ledge[i], redge[i]))
+            replaced[ledge[i]:redge[i]] = (replaced[ledge[i]]+\
+                                           replaced[redge[i]])/2.
 
         final_mean = np.mean(replaced)
         final_std = np.std(replaced)
@@ -220,51 +227,81 @@ class filterdata():
         self.cutoff = cutoff
         self.fs = fs
     
-    def highpass(self, order):
+    def butter_filter(self, order, filter_type='highpass'):
 
         '''
         Highpass butterworth filter.
         order parameter is the order of the butterworth filter
         '''
+
+        try:
+            if filter_type.lower() not in ['highpass', 'lowpass']:
+                raise InputError
+        except InputError:
+            print('The filter type choosen is not correct. Choose between highpass and lowpass')
+            sys.exit(1)
         
         nyq = 0.5*self.fs
         normal_cutoff = self.cutoff / nyq
         b, a = sgn.butter(order, normal_cutoff, btype='highpass', analog=False)
         return b, a
 
-    def butter_highpass_filter(self, order=5):
+    def butter_filter_data(self, order=5, filter_type='highpass'):
 
         '''
         Data filtered with a butterworth filter 
         order parameter is the order of the butterworth filter
         '''
-        b, a = self.highpass(order)
+        b, a = self.butter_filter(order, filter_type)
         filterdata = sgn.lfilter(b, a, self.data)
         return filterdata
 
-    def cosine_filter(self, f):
+    def cosine_filter(self, f, filter_type='highpass'):
 
         '''
-        Highpass cosine filter
+        Cosine filter
         '''
 
-        if f < .5*self.cutoff:
-            return 0
-        elif 0.5*self.cutoff <= f  and f <= self.cutoff:
-            return 0.5-0.5*np.cos(np.pi*(f-0.5*self.cutoff)*(self.cutoff-0.5*self.cutoff)**-1)
-        elif f > self.cutoff:
-            return 1
+        if filter_type.lower() == 'highpass':
+            if f < .5*self.cutoff:
+                return 0
+            elif 0.5*self.cutoff <= f  and f <= self.cutoff:
+                return 0.5-0.5*np.cos(np.pi*(f-0.5*self.cutoff)*(self.cutoff-0.5*self.cutoff)**-1)
+            elif f > self.cutoff:
+                return 1
+
+        elif filter_type.lower() == 'lowpass':
+            if f < .5*self.cutoff:
+                return 1
+            elif 0.5*self.cutoff <= f  and f <= self.cutoff:
+                return 0.5+0.5*np.cos(np.pi*(f-0.5*self.cutoff)/(0.5*self.cutoff))
+            elif f > self.cutoff:
+                return 0
     
-    def fft_filter(self, window):
+    def cosine_filter_data(self, window=True, filter_type='highpass', \
+                           window_type='hanning', beta_kaiser=0):
 
         '''
-        Return an fft of the despiked data using the cosine filter.
-        Window is a parameter that can be true if the FFT is computed 
-        using a Hanning window
+        Return an fft of the data using the cosine filter.
+        Parameters:
+        - window: if True the FFT is computed 
+                  using one of the available windows
+        - window_type: type of the window to be applied. Choose between
+                       hanning, bartlett, blackman, hamming and kaiser
+        - beta_kaiser: beta parameter for the kaiser window
         '''
 
         if window is True:
-            window_data = np.hanning(len(self.data))
+            if window_type.lower() == 'hanning':
+                window_data = np.hanning(len(self.data))
+            elif window_type.lower() == 'bartlett':
+                window_data = np.bartlett(len(self.data))
+            elif window_type.lower() == 'blackman':
+                window_data = np.blackman(len(self.data))
+            elif window_type.lower() == 'hamming':
+                window_data = np.hamming(len(self.data))
+            elif window_type.lower() == 'kaiser':
+                window_data = np.kaiser(len(self.data), beta_kaiser)
 
             fft_data = np.fft.rfft(self.data*window_data)
         else:
@@ -274,19 +311,60 @@ class filterdata():
 
         vect = np.vectorize(self.cosine_filter)
 
-        filtereddata = vect(fft_frequency)*fft_data
-
-        return filtereddata
-
-    def ifft_filter(self, window):
-
-        '''
-        Inverse FFT of cleaned FFT data calculated in the previous function.
-        '''
-
-        ifft_data = np.fft.irfft(self.fft_filter(window=window), len(self.data))
+        ifft_data = np.fft.irfft(vect(fft_frequency)*fft_data, len(self.data))
 
         return ifft_data
+
+    def filter_data(self, filter_type='highpass', filter_choice='cosine', \
+                    cosine_window=True, cosine_filter_window='hanning', \
+                    cosine_beta_kaiser=0, butter_order=5):
+
+        '''
+        Filter data with one the two filters available. 
+        Options:
+        - filter_type: choose if the filter should be an highpass or lowpass filter
+        - filter_choice: choose between a cosine or a butterworth filter
+        - cosine_filter_window: choose the filter window between
+                                hanning, bartlett, blackman, hamming and kaiser
+        - cosine_beta_kaiser: beta parameter for the kaiser window for a cosine window
+        - butter_order: order for the butterworth filter
+        '''
+
+        try:
+            if filter_type.lower() not in ['highpass', 'lowpass']:
+                raise InputError
+        except InputError:
+            print('The filter type choosen is not correct. Choose between highpass and lowpass')
+            sys.exit(1)
+
+        try:
+            if filter_choice.lower() not in ['cosine', 'butterworth']:
+                raise InputError
+        except InputError:
+            print('The filter choice is not correct. Choose between cosine and butterworth')
+            sys.exit(1)
+
+        try:
+            if cosine_window is True:
+                window_list = ['hanning', 'bartlett', 'blackman', 'hamming', 'kaiser']
+                if cosine_filter_window.lower() not in window_list:
+                    raise InputError
+        except InputError:
+            print('The window choosen for the cosine filter is not correct. \
+                   Choose between hanning, bartlett, blackman, hamming, kaiser')
+            sys.exit(1)
+        
+
+        if filter_choice.lower() == 'cosine':
+            
+            filterdata = self.cosine_filter_data(cosine_window, filter_type, \
+                                                 cosine_filter_window, cosine_beta_kaiser)
+        
+        elif filter_choice.lower() == 'butterworth':
+
+            filterdata = self.butter_filter_data(butter_order, filter_type)
+
+        return filterdata
 
 class detector_trend():
 
@@ -297,61 +375,68 @@ class detector_trend():
     def __init__(self, data):
 
         self.data = data
+        self.x = np.arange(len(self.data))
 
-    def polyfit(self, edge = 0, delay=0, order=6):
+    def polyfit(self, y=None, order=6):
 
         '''
         Function to fit a trend line to a TOD
         '''
+        
+        if y is None:
+            y = self.data
 
-        x = np.arange(len(self.data))
+        p = np.polyfit(self.x, y, order)
+        poly = np.poly1d(p)
+        y_fin = poly(self.x)
 
-        y_fin = np.array([])
-        index_exclude = np.array([], dtype=int)
+        return y_fin, p
 
-        if np.size(edge) == 1:
-            p = np.polyfit(x, self.data, order)
-            poly = np.poly1d(p)
-            y_fin = poly(x)
-        else:
-            if np.size(delay) == 1:
-                delay = np.ones(np.size(edge)+1)*delay
-                delay[0] = 0
-            else:
-                delay = delay 
-            for i in range(np.size(edge)+1):
-                index1 = int(i*edge+delay[i])  
-                index2 = int((i+1)*edge)
-                
-                p = np.polyfit(x[index1:index2], \
-                               self.data[index1:index2], order)
+    def baseline(self, y=None, order=6, iter_val=100, tol=1e-3):
 
-                poly = np.poly1d(p)
-                y = poly(x[index1:index2])
-                y_fin = np.append(y_fin, y)
+        import scipy.linalg as LA
 
-                if i != np.size(edge):
-                    if delay[i+1] > 0:
-                        zeros = np.zeros(int(delay[i+1]))
-                        y_fin = np.append(y_fin, zeros)
-                        index_exclude = np.append(index_exclude, np.arange(delay[i+1])+edge)
+        '''
+        Routine to compute the baseline of the timestream. Based on the peakutils package
+        Parameters:
+        - order: order of the polynominal
+        - iter_val: number of iteration required to find the baseline
+        - tol: tolerance to stop the iteration. The tolerance criteria is computed on the 
+               coefficents of the polynomial
+        '''
 
-        return y_fin, index_exclude.astype(int)
+        coeffs = np.ones(int(order+1))
+
+        if y is None:
+            y = self.data
+        
+        for i in range(iter_val):
+
+            base, coeffs_new = self.polyfit(y=y, order=order)
+
+            if LA.norm(coeffs_new - coeffs) / LA.norm(coeffs) < tol:
+                coeffs = coeffs_new
+                break
+
+            coeffs = coeffs_new
+            y = np.minimum(y, base)
+
+        poly = np.poly1d(coeffs)
+
+        return poly(self.x)
     
-    def fit_residual(self, edge = 0, delay=0, order=6):
+    def fit_residual(self, order=6, baseline=False):
 
         '''
         Function to remove the trend polynomial from the TOD
         '''
 
-        polyres = self.polyfit(edge=edge, delay=delay, order=order)
-        fitteddata = polyres[0]
-        index = polyres[1]
+        if baseline is True:
+            baseline = self.baseline(order=order)
+        else:
+            baseline = self.polyfit(order=order)[0]
 
-        zero_data = self.data.copy()
-        zero_data[index] = 0.
-
-        return -fitteddata+zero_data
+        return self.data-baseline
 
 class kidsutils():
 
