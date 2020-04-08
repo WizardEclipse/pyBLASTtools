@@ -8,34 +8,30 @@ class wcs_world():
     Class to generate a wcs using astropy routines.
     '''
 
-    def __init__(self, coord1, coord2, ctype, crpix, crdelt, crval, radesys, equinox, parang = 0, telcoord=False):
+    def __init__(self, ctype, crpix, crdelt, crval, radesys, equinox):
 
-        self.coord1 = coord1        #Array with the value of the first coordinate
-        self.coord2 = coord2        #Array with the value of the second coordinate
         self.ctype = ctype          #ctype of the map, which projection is used to convert coordinates to pixel numbers
         self.crdelt = crdelt        #cdelt of the map, distance in deg between two close pixels
         self.crpix = crpix          #crpix of the map, central pixel of the map in pixel coordinates
         self.crval = crval          #crval of the map, central pixel of the map in sky/telescope (depending on the system) coordinates
         self.radesys = radesys      #Frame of the observation
         self.equinox = equinox      #Time of the observation
-        self.parang = parang        #Parallactic Angle
-        self.telcoord = telcoord    #Telescope coordinates boolean value. Check map class for more explanation
 
-    def world(self, coord, pang):
+        self.w = wcs.WCS(naxis=2)
+        self.w.wcs.crpix = self.crpix
+        self.w.wcs.cdelt = self.crdelt
+        self.w.wcs.crval = self.crval
+        self.w.wcs.radesys = self.radesys
+        self.w.wcs.equinox = self.equinox
+
+    def world(self, coord, pang, telcoord):
         
         '''
         Function for creating a wcs projection and a pixel coordinates 
         from sky/telescope coordinates
         '''
 
-        w = wcs.WCS(naxis=2)
-        w.wcs.crpix = self.crpix
-        w.wcs.cdelt = self.crdelt
-        w.wcs.crval = self.crval
-        w.wcs.radesys = self.radesys
-        w.wcs.equinox = self.equinox
-
-        if self.telcoord is False:
+        if telcoord is False:
             if self.ctype == 'XY Stage':
                 world = np.zeros_like(coord)
                 try:
@@ -44,30 +40,31 @@ class wcs_world():
                 except IndexError:
                     world[0,0] = coord[0,0]/(np.amax(coord[0,0]))*360.
                     world[0,1] = coord[0,1]/(np.amax(coord[0,1]))*360.
-                w.wcs.ctype = ["TLON-CAR", "TLAT-CAR"]
+                self.w.wcs.ctype = ["TLON-CAR", "TLAT-CAR"]
             else:
                 if self.ctype == 'RA and DEC':
-                    w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+                    self.w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
                 elif self.ctype == 'AZ and EL':
-                    w.wcs.ctype = ["TLON-ARC", "TLAT-ARC"]
+                    self.w.wcs.ctype = ["TLON-ARC", "TLAT-ARC"]
                 elif self.ctype == 'CROSS-EL and EL':
-                    w.wcs.ctype = ["TLON-CAR", "TLAT-CAR"]
+                    self.w.wcs.ctype = ["TLON-CAR", "TLAT-CAR"]
                 
-                world = w.all_world2pix(coord, 1)
+                world = self.w.all_world2pix(coord, 1)
 
         else:
-            w.wcs.ctype = ["TLON-TAN", "TLAT-TAN"]
+            self.w.wcs.ctype = ["TLON-TAN", "TLAT-TAN"]
             world = np.zeros_like(coord)
-            px = w.wcs.s2p(coord, 1)
+            px = self.w.wcs.s2p(coord, 1)
+
             #Use the parallactic angle to rotate the projected plane
             world[:,0] = ((px['imgcrd'][:,0]*np.cos(pang)-px['imgcrd'][:,1]*np.sin(pang))\
                           /self.crdelt[0]+self.crpix[0])
             world[:,1] = ((px['imgcrd'][:,0]*np.sin(pang)+px['imgcrd'][:,1]*np.cos(pang))\
                           /self.crdelt[1]+self.crpix[1])
 
-        return world, w
+        return world
 
-    def wcs_proj(self, det_num):
+    def wcs_proj(self, coord1, coord2, det_num, parang=0, telcoord=False):
 
         '''
         Function to compute the projection and the pixel coordinates
@@ -75,36 +72,42 @@ class wcs_world():
 
         if det_num == 1:
 
-            if np.size(np.shape(self.coord1)) != 1:
-                coord = np.transpose(np.array([self.coord1[0], self.coord2[0]]))
+            if np.size(np.shape(coord1)) != 1:
+                coord = np.transpose(np.array([coord1[0], coord2[0]]))
             else:
-                coord = np.transpose(np.array([self.coord1, self.coord2]))
+                coord = np.transpose(np.array([coord1, coord2]))
 
-            self.w, self.proj = self.world(coord, self.parang)
+            self.pixel = self.world(coord, parang, telcoord)
 
         else:
-            if np.size(np.shape(self.coord1)) == 1:
-                coord = np.transpose(np.array([self.coord1, self.coord2]))
-                self.w, self.proj = self.world(self.parang[0,:])
+            if np.size(np.shape(coord1)) == 1:
+                coord = np.transpose(np.array([coord1, coord2]))
+                self.pixel = self.world(coord, parang[0,:], telcoord)
             else:
-                self.w = np.zeros((np.size(np.shape(self.data)), len(self.coord1[0]), 2))
+                self.pixel = np.zeros((np.size(np.shape(self.data)), len(coord1[0]), 2))
                 for i in range(np.size(np.shape(self.data))):
-                    coord = np.transpose(np.array([self.coord1[i], self.coord2[i]]))
-                    self.w[i,:,:], self.proj = self.world(coord, self.parang[i,:])
+                    coord = np.transpose(np.array([coord1[i], coord2[i]]))
+                    self.pixel[i,:,:] = self.world(coord, parang[i,:], telcoord)
 
 
-    def reproject(self, world_original, proj_original):
+    def reproject(self, world_original):
+
+
+        self.w.wcs.ctype = self.ctype
+
 
         x_min_map = np.floor(np.amin(world_original[:,0]))
         y_min_map = np.floor(np.amin(world_original[:,1]))
 
-        crpix_new = proj_original.wcs.crpix+np.array([x_min_map, y_min_map])
+        new_proj = self.w.copy()
 
-        crval_new = proj_original.all_pix2world(crpix_new[0], crpix_new[1], 1)
+        crpix_new = self.w.wcs.crpix+np.array([x_min_map, y_min_map])
 
-        proj_original.wcs.crval = crval_new
+        crval_new = self.w.all_pix2world(crpix_new[0], crpix_new[1], 1)
 
-        return proj_original
+        new_proj.wcs.crval = crval_new
+
+        return new_proj
 
 class mapmaking(object):
 
@@ -273,6 +276,8 @@ class mapmaking(object):
             
             I_flat = np.append(I_flat, I_fin)
 
+        I_flat[I_flat==0] = np.nan
+
         I_pixel = np.reshape(I_flat, (y_len+1,x_len+1))
 
         return I_pixel
@@ -343,6 +348,8 @@ class mapmaking(object):
 
         finalmap = finalmap_num/finalmap_den
 
+        finalmap[finalmap==0] = np.nan
+
         return finalmap
 
     def map_singledetector(self, crpix, value=None, sigma=None, angle=None, idxpixel=None):
@@ -397,8 +404,10 @@ class mapmaking(object):
             Q_pixel_flat = np.append(Q_pixel_flat, Q_fin)
             U_pixel_flat = np.append(U_pixel_flat, U_fin)
 
-        ind_pol, = np.nonzero(Q_pixel_flat)
-
+        I_pixel_flat[I_pixel_flat==0] = np.nan
+        Q_pixel_flat[Q_pixel_flat==0] = np.nan
+        U_pixel_flat[U_pixel_flat==0] = np.nan
+        
         I_pixel = np.reshape(I_pixel_flat, (y_len+1,x_len+1))
         Q_pixel = np.reshape(Q_pixel_flat, (y_len+1,x_len+1))
         U_pixel = np.reshape(U_pixel_flat, (y_len+1,x_len+1))
@@ -515,13 +524,17 @@ class mapmaking(object):
         F = c2_flat*N_hits_flat-c_flat**2
 
         index, = np.where(np.abs(Delta)>0.)
-        print('INDEX', i, index, np.amin(Delta[index]), np.amax(Delta[index]))
+
         finalmap_I[index] = (A[index]*finalmap_I_est[index]+B[index]*finalmap_Q_est[index]+\
                              C[index]*finalmap_U_est[index])/Delta[index]
         finalmap_Q[index] = (B[index]*finalmap_I_est[index]+D[index]*finalmap_Q_est[index]+\
                              E[index]*finalmap_U_est[index])/Delta[index]
         finalmap_U[index] = (C[index]*finalmap_I_est[index]+E[index]*finalmap_Q_est[index]+\
                              F[index]*finalmap_U_est[index])/Delta[index]
+
+        finalmap_I[finalmap_I==0] = np.nan
+        finalmap_Q[finalmap_Q==0] = np.nan
+        finalmap_U[finalmap_U==0] = np.nan
 
         return finalmap_I, finalmap_Q, finalmap_U
 
@@ -534,7 +547,9 @@ class mapmaking(object):
 
         kernel = Gaussian2DKernel(x_stddev=std)
 
-        convolved_map = convolve(map_value, kernel)
+        convolved_map = convolve(map_value, kernel, nan_treatment='fill', fill_value=0)
+
+        convolved_map[convolved_map==0] = np.nan
 
         return convolved_map
 

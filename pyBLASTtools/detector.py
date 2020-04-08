@@ -92,8 +92,10 @@ class despike():
         The height of the peak is computed with respect to the mean of the signal        
         '''
 
-        y_std = np.std(self.data)
-        y_mean = np.mean(self.data)
+        val = (self.data-np.mean(self.data))/np.mean(self.data)
+
+        y_std = np.std(self.data[val<0.3])
+        y_mean = np.mean(self.data[val<0.3])
         
         data_to_despike = self.data-y_mean
 
@@ -190,9 +192,11 @@ class despike():
             replaced[ledge[i]:redge[i]] = (replaced[ledge[i]]+\
                                            replaced[redge[i]])/2.
 
-        final_mean = np.mean(replaced)
-        final_std = np.std(replaced)
-        final_var = np.var(replaced)
+        val = (replaced-np.mean(replaced))/np.mean(replaced)
+
+        final_mean = np.mean(replaced[val<0.3])
+        final_std = np.std(replaced[val<0.3])
+        final_var = np.var(replaced[val<0.3])
 
         p_stat = np.abs(final_mean/final_var-1.)
 
@@ -243,7 +247,7 @@ class filterdata():
         
         nyq = 0.5*self.fs
         normal_cutoff = self.cutoff / nyq
-        b, a = sgn.butter(order, normal_cutoff, btype='highpass', analog=False)
+        b, a = sgn.butter(order, normal_cutoff, btype=filter_type, analog=False)
         return b, a
 
     def butter_filter_data(self, order=5, filter_type='highpass'):
