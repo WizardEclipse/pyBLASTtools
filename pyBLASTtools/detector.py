@@ -448,6 +448,14 @@ class kidsutils():
     Class containing useful functions for KIDs
     '''
 
+    def __init__(self, I, Q):
+
+        self.I = I
+        self.Q = Q
+
+        self.phase = self.KIDphase(self.I, self.Q)
+        self.mag = self.KIDmag()
+
     def rotatePhase(self, I, Q):
 
         '''
@@ -475,10 +483,20 @@ class kidsutils():
 
         return phi-phibar
 
-    def KIDmag(self, I, Q):
+    def KIDmag(self):
 
         ''' 
         Compute the magnitude response of a KID
         '''
 
-        return np.sqrt(I**2+Q**2 )
+        return np.sqrt(self.I**2+self.Q**2)
+
+    def KIDdf(self, target_path):
+
+        '''
+        Compute df of a kid knowing the target sweep located at target_path        
+        '''
+
+        target = np.loadtxt(target_path)
+
+        self.df = func(self.I, self.Q, target)
