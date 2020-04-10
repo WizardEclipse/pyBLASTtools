@@ -17,3 +17,5 @@ v1.0: Reorganization of the mapmaker and pointing libraries
       Correct a bug in applying offset to the TOD
       Changed the algorithm to detrend the TOD
       Added multiple options to filter the data
+      Added some utils functions (change sampling frequency and remove drift)
+      Added options to give directly the field for master to the interpolation function in timing.py

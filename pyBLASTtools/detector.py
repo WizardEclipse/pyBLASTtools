@@ -453,33 +453,33 @@ class kidsutils():
         self.I = I
         self.Q = Q
 
-        self.phase = self.KIDphase(self.I, self.Q)
+        self.phase = self.KIDphase()
         self.mag = self.KIDmag()
 
-    def rotatePhase(self, I, Q):
+    def rotatePhase(self):
 
         '''
         Rotate phase for a KID
         '''
 
-        X = I+1j*Q
-        phi_avg = np.arctan2(np.mean(Q),np.mean(I))
+        X = self.I+1j*self.Q
+        phi_avg = np.arctan2(np.mean(self.Q),np.mean(self.I))
+        print(phi_avg, np.degrees(phi_avg))
         E = X*np.exp(-1j*phi_avg)
-        I = E.real
-        Q = E.imag
+        print(E)
+        self.I_rot = E.real
+        self.Q_rot = E.imag
 
-        return I, Q
-
-    def KIDphase(self, I, Q):
+    def KIDphase(self):
 
         '''
         Compute the phase of a KID. This is proportional to power, in particular
         Power = Phase/Responsivity
         '''
 
-        phibar = np.arctan2(np.mean(Q),np.mean(I))
-        I_rot, Q_rot = self.rotatePhase(I, Q)
-        phi = np.arctan2(Q,I)
+        phibar = np.arctan2(np.mean(self.Q),np.mean(self.I))
+        self.rotatePhase()
+        phi = np.arctan2(self.Q_rot, self.I_rot)
 
         return phi-phibar
 
@@ -490,13 +490,3 @@ class kidsutils():
         '''
 
         return np.sqrt(self.I**2+self.Q**2)
-
-    def KIDdf(self, target_path):
-
-        '''
-        Compute df of a kid knowing the target sweep located at target_path        
-        '''
-
-        target = np.loadtxt(target_path)
-
-        self.df = func(self.I, self.Q, target)

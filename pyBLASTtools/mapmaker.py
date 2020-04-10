@@ -547,7 +547,10 @@ class mapmaking(object):
 
         kernel = Gaussian2DKernel(x_stddev=std)
 
-        convolved_map = convolve(map_value, kernel, nan_treatment='fill', fill_value=0)
+        mask = np.ones_like(map_value)
+        mask[np.isfinite(map_value)] = 0
+
+        convolved_map = convolve(map_value, kernel, mask=mask, boundary=None)
 
         convolved_map[convolved_map==0] = np.nan
 

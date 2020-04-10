@@ -5,6 +5,8 @@ from itertools import compress
 from scipy import interpolate
 import sys
 
+from . import utils
+
 class Error(Exception):
     """Base class for exceptions in this module."""
     pass
@@ -527,13 +529,15 @@ class dirfile_interp():
             self.d_master.flush('ctime_master_built')
             self.d_roach.flush(roach_time_str)
                 
-    def interp(self, field_master, field_roach, direction='mtr', interpolation_type='linear'):
+    def interp(self, field_master, field_roach, fs_master=None,\
+               direction='mtr', interpolation_type='linear'):
 
         '''
         Method for loading the data from the dirfile and then calling the interpolation method
         List of variables:
         - field_master: a string with the field coming from master
         - field_roach: a string with the field 
+        - field_master_array: an array with the field from the master file
         - direction: the direction of the interpolation
                      - mtr: interpolating master to roach
                      - rtm: interpolating roach to master 
@@ -543,29 +547,47 @@ class dirfile_interp():
         #On master every field has a different number of sample per frame
         #The index on the time needs to be shifted to take into consideration the different spf
 
-        spf_ctime = self.d_master.spf('ctime_master_built')
-        spf_field = self.d_master.spf(field_master)
+        if isinstance(field_master, np.ndarray):
+            field_master_array = field_master
 
-        if spf_ctime != spf_field:
-            field_master_array = self.master_to_100(field_master, spf_field, spf_ctime)
-        
+            if fs_master is None:
+                fs_master = int(len(field_master_array)/len(self.time_master)*self.d_master.spf('ctime_master_built'))
+
+            if len(field_master_array) != len(self.time_master):
+
+                time_master_new = utils.change_sampling_rate(self.time_master, field_master_array, \
+                                                             self.d_master.spf('ctime_master_built'), \
+                                                             fs_master)
         else:
-            field_master_array = self.d_master.getdata(field_master)
-            field_master_array = field_master_array[self.idx_start_master:self.idx_end_master]
+            spf_ctime = self.d_master.spf('ctime_master_built')
+            spf_field = self.d_master.spf(field_master)
+
+            if spf_ctime != spf_field:
+                field_master_array = self.master_to_100(field_master, spf_field, spf_ctime)
+            
+            else:
+                field_master_array = self.d_master.getdata(field_master)
+                field_master_array = field_master_array[self.idx_start_master:self.idx_end_master]
+
+            time_master_new = None
  
         field_roach_array = self.d_roach.getdata(field_roach, first_frame=self.idx_start_roach, \
                                                  num_frames=int(self.idx_end_roach-self.idx_start_roach))
 
         field_master_int, field_roach_int = self.interpolate(field_master_array, field_roach_array, \
+                                                             time_master_array=time_master_new,\
                                                              direction=direction,\
                                                              interpolation_type=interpolation_type)
 
-        self.d_master.flush(field_master)
+        try:
+            self.d_master.flush(field_master)
+        except TypeError:
+            pass 
         self.d_roach.flush(field_roach)
 
         return field_master_int, field_roach_int
 
-    def master_to_100(self, field_master, spf_field=None, spf_ctime=None):
+    def master_to_100(self, field_master, spf_field=None, spf_ctime=None, field_master_array=None):
 
         '''
         Function to convert master fields from a certain sampling frequency to 100 Hz.
@@ -578,28 +600,27 @@ class dirfile_interp():
         if spf_ctime is None:
             spf_ctime = self.d_master.spf('ctime_master_built')
 
-        idx_start_master_temp = int(np.floor(self.idx_start_master*spf_field/spf_ctime))
-        idx_end_master_temp = int(np.floor(self.idx_end_master*spf_field/spf_ctime))
-        
-        field_master_array = self.d_master.getdata(field_master)
-        field_master_array = field_master_array[idx_start_master_temp:idx_end_master_temp]
+        if field_master_array is None:
+            idx_start_master_temp = int(np.floor(self.idx_start_master*spf_field/spf_ctime))
+            idx_end_master_temp = int(np.floor(self.idx_end_master*spf_field/spf_ctime))
+            
+            field_master_array = self.d_master.getdata(field_master)
+            field_master_array = field_master_array[idx_start_master_temp:idx_end_master_temp]
+        else:
+            field_master_array = field_master_array
 
-        x_axis = np.arange(len(field_master_array))/(spf_field/spf_ctime)
+        return utils.change_sampling_rate(field_master_array, self.time_master, spf_field, spf_ctime)
 
-        f = interpolate.interp1d(x_axis, field_master_array, kind='linear', fill_value='extrapolate')
-        field_master_array = f(np.arange(len(self.time_master)))
-
-        assert len(field_master_array) == len(self.time_master)
-
-        return field_master_array
-
-    def interpolate(self, master_array, roach_array, direction='mtr', interpolation_type='linear'):
+    def interpolate(self, master_array, roach_array, time_master_array=None, \
+                    direction='mtr', interpolation_type='linear'):
 
         '''
         Method for interpolating the data.
         List of variables:
         - master_array: array with the data coming from master
         - roach_array: array with the data coming from roach
+        - time_master_array: an array with the time information for the master field. 
+                             If None, time_master=self.time_master
         - direction: the direction of the interpolation
                      - mtr: interpolating master to roach
                      - rtm: interpolating roach to master 
@@ -616,16 +637,22 @@ class dirfile_interp():
             print('The direction choosen for the interpolation is not correct. Choose between mtr and rtm')
             sys.exit(1)
 
+        if time_master_array is None:
+            time_master_array = self.time_master.copy()
+        else:
+            time_master_array = time_master_array
+
+
         if direction == 'rtm':
 
             f = interpolate.interp1d(self.time_roach, roach_array, kind=interpolation_type, \
                                      fill_value='extrapolate')
 
-            return master_array, f(self.time_master)
+            return master_array, f(time_master_array)
         
         elif direction == 'mtr':
 
-            f = interpolate.interp1d(self.time_master, master_array, kind=interpolation_type, \
+            f = interpolate.interp1d(time_master_array, master_array, kind=interpolation_type, \
                                      fill_value='extrapolate')
             
             return f(self.time_roach), roach_array

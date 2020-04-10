@@ -6,7 +6,6 @@ import pyBLASTtools.mapmaker as mp
 
 def plot_map(map_value, projection, idxpixel, title=None, centroid=None, save=False, save_path=None):
 
-
     wcs_proj = mp.wcs_world(projection.wcs.ctype, projection.wcs.crpix, projection.wcs.cdelt, \
                             projection.wcs.crval, projection.wcs.radesys, projection.wcs.equinox)
 
@@ -33,7 +32,7 @@ def plot_map(map_value, projection, idxpixel, title=None, centroid=None, save=Fa
 
     if centroid is not None:
         ax.plot(centroid[0]-np.floor(np.amin(idxpixel[:,0])), \
-                centroid[1]-np.floor(np.amin(idxpixel[:,1])), 'x', c='red')
+                centroid[1]-np.floor(np.amin(idxpixel[:,1])), 'x', c='red', transform=ax.get_transform('pixel'))
 
     c1 = ax.coords[0]           
     c2 = ax.coords[1]
