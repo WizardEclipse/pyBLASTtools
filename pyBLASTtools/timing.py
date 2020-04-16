@@ -611,16 +611,22 @@ class dirfile_interp():
 
         return utils.change_sampling_rate(field_master_array, self.time_master, spf_field, spf_ctime)
 
-    def interpolate(self, master_array, roach_array, time_master_array=None, \
-                    direction='mtr', interpolation_type='linear'):
+    def interpolate(self, master_array=None, roach_array=None, time_master_array=None, \
+                    fs_master=None, direction='mtr', interpolation_type='linear'):
 
         '''
         Method for interpolating the data.
         List of variables:
-        - master_array: array with the data coming from master
-        - roach_array: array with the data coming from roach
+        - master_array: array with the data coming from master. If None, only the roach_array is required
+                        and it will be interpolated to the same frequency of the master_array using the 
+                        master_roach variable
+        - roach_array: array with the data coming from roach. If None, only the master_array is required
+                       and it will be interpolated to the same frequency of the roach_array using the 
+                       time_roach variable
         - time_master_array: an array with the time information for the master field. 
                              If None, time_master=self.time_master
+        - fs_master: sampling frequency of the master array. If None, the code is traying to compute it 
+                     automatically. This may lead to errors if 100/fs is not INT or fs/100 is not INT
         - direction: the direction of the interpolation
                      - mtr: interpolating master to roach
                      - rtm: interpolating roach to master 
@@ -639,23 +645,54 @@ class dirfile_interp():
 
         if time_master_array is None:
             time_master_array = self.time_master.copy()
+
+            if len(time_master_array) != len(master_array):
+                
+                if fs_master is None:
+                    fs_master = int(len(master_array)/len(self.time_master)*\
+                                    self.d_master.spf('ctime_master_built'))
+
+                time_master_array = utils.change_sampling_rate(self.time_master, master_array, \
+                                                               self.d_master.spf('ctime_master_built'), \
+                                                               fs_master)
+
         else:
             time_master_array = time_master_array
 
+        try:
+            if master_array is not None or roach_array is not None:
+                pass
+            else:
+                raise InputError
+        except InputError:
+            print('At least one between the master array and the roach array need to be different from None')
+            sys.exit(1)
+
+        if master_array is None:
+            direction = 'rtm'
+        
+        if roach_array is None:
+            direction = 'mtr'
 
         if direction == 'rtm':
 
             f = interpolate.interp1d(self.time_roach, roach_array, kind=interpolation_type, \
                                      fill_value='extrapolate')
 
-            return master_array, f(time_master_array)
-        
+            if master_array is not None:
+                return master_array, f(time_master_array)
+            else:
+                return f(time_master_array)
+
         elif direction == 'mtr':
 
             f = interpolate.interp1d(time_master_array, master_array, kind=interpolation_type, \
                                      fill_value='extrapolate')
             
-            return f(self.time_roach), roach_array
+            if roach_array is not None:
+                return f(self.time_roach), roach_array
+            else:
+                return f(self.time_roach)
 
         
 

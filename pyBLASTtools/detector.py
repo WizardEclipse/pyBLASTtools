@@ -1,6 +1,7 @@
 import numpy as np
 import scipy.signal as sgn
 import sys
+from scipy import interpolate
 
 class Error(Exception):
     """Base class for exceptions in this module."""
@@ -9,67 +10,6 @@ class Error(Exception):
 class InputError(Error):
     """Exception raised for errors in the input. """
     pass
-
-class data_cleaned():
-
-    '''
-    Class to clean the detector TOD using the functions in 
-    the next classes. Check them for more explanations
-    '''
-
-    def __init__(self, data, fs, cutoff, detlist, polynomialorder, despike, sigma, prominence):
-
-        self.data = data                #detector TOD
-        self.fs = float(fs)             #frequency sampling of the detector
-        self.cutoff = float(cutoff)     #cutoff frequency of the highpass filter
-        self.detlist = detlist          #detector name list
-        self.polynomialorder = polynomialorder #polynomial order for fitting
-        self.sigma = sigma                  #height in std value to look for spikes
-        self.prominence = prominence        #prominence in std value to look for spikes
-        self.despike = despike              #if True despikes the data 
-        
-
-    def data_clean(self):
-
-        '''
-        Function to return the cleaned TOD as numpy array
-        '''
-        cleaned_data = np.zeros_like(self.data)
-
-
-        if np.size(self.detlist) == 1:
-            det_data = detector_trend(self.data)
-            if self.polynomialorder != 0:
-                residual_data = det_data.fit_residual(order=self.polynomialorder)
-            else:
-                residual_data = self.data
-
-            if self.despike is True:
-                desp = despike(residual_data)
-                data_despiked = desp.replace_peak(hthres=self.sigma, pthres=self.prominence)
-            else:
-                data_despiked = residual_data.copy()
-
-            if self.cutoff != 0:
-                filterdat = filterdata(data_despiked, self.cutoff, self.fs)
-                cleaned_data = filterdat.ifft_filter(window=True)
-            else:
-                cleaned_data = data_despiked
-
-            return cleaned_data
-
-        else:
-            for i in range(np.size(self.detlist)):
-                det_data = detector_trend(self.data[i,:])
-                residual_data = det_data.fit_residual()
-
-                desp = despike(residual_data)
-                data_despiked = desp.replace_peak()
-
-                filterdat = filterdata(data_despiked, self.cutoff, self.fs)
-                cleaned_data[i,:] = filterdat.ifft_filter(window=True)
-
-            return cleaned_data
         
 class despike():
 
@@ -77,141 +17,149 @@ class despike():
     Class to despike the TOD
     '''
 
-    def __init__(self, data):
+    def __init__(self, data, remove_mean=True, mean_std_distance=0.3, hthres=4, thres=4, pthres=None, \
+                 width=np.array([1,10]), full_width=False, rel_height=0.5):
+
+        '''
+        These are the parameters for this class:
+
+        - data: signal that needs to be analyzed
+        - remove_mean: a parameter to choose if the mean is removed from the signal that needs 
+                       to be analyzed
+        - mean_std_distance: a parameter used to compute the useful data for estimating the mean 
+                             and std of the signal. 
+                             This parameter is given by (data-mean(data))/np.mean(data)
+        - hthres: height of the peaks in unit of std
+        - thres: vertical distance to neighbouring samples in unit of std
+        - pthres: prominance of the peaks in unit of std 
+        - width: required width of the peak to be found. If a single number that is the minimum 
+                 width of the peak. If a 2D array the first element is the minimum width and the 
+                 second one is the maximum width. If None, a default value of a maximum value of 
+                 200 samples will be used for the width of the peak
+
+        For hthres, thres and pthres more information can be found on the at scipy.signal.find_peaks
+        '''
 
         self.data = data
+        self.remove_mean = remove_mean
+        self.mean_std_distance = mean_std_distance
 
-    def findpeak(self, thres=5, hthres=5, pthres=None, width=np.array([1, 10])):
-
-        '''
-        This function finds the peak in the TOD. The optional arguments are the standard 
-        from scipy.signal.find_peaks
-
-        hthresh, pthres and thresh are measured in how many std the height, the prominence 
-        or the threshold (distance from its neighbouring samples) of the peak is computed. 
-        The height of the peak is computed with respect to the mean of the signal        
-        '''
+        if self.mean_std_distance < 1e-5 or self.mean_std_distance > 1:
+            self.mean_std_distance = 0.3
 
         val = (self.data-np.mean(self.data))/np.mean(self.data)
 
-        y_std = np.std(self.data[val<0.3])
-        y_mean = np.mean(self.data[val<0.3])
+        self.signal_std = np.std(self.data[val<mean_std_distance])
+        self.signal_mean = np.mean(self.data[val<mean_std_distance])
         
-        data_to_despike = self.data-y_mean
+        if remove_mean:
+            self.signal = self.data-self.signal_mean
+        else:
+            self.signal = self.data.copy()
 
         if hthres is not None:
-            hthres = hthres*y_std
-        if pthres is not None:
-            pthres = pthres*y_std
-        if thres is not None:
-            thresh = thres*y_std
-        if width is not None:
-            width = width
-
-        index, param = sgn.find_peaks(np.abs(data_to_despike), height = hthres, prominence = pthres, \
-                                      threshold = thresh, width=width)
-
-        return index
-
-    def peak_width(self, peaks, thres=5, hthres=5, pthres=0, window = 100):
-
-
-        '''
-        Function to estimate the width of the peaks.
-        Window is the parameter used by the algorith to find the minimum 
-        left and right of the peak. The minimum at left and right is used
-        to compute the width of the peak
-        '''
-
-        y_mean = np.mean(self.data)
-        if np.amin(self.data) > 0:
-            data_to_despike = self.data-y_mean
+            self.hthres = hthres*self.signal_std
         else:
-            data_to_despike = self.data.copy()
-        param = sgn.peak_widths(np.abs(data_to_despike),peaks, rel_height = 1.0)
+            self.hthres = hthres
 
-        ledge = np.array([], dtype='int')
-        redge = np.array([], dtype='int')
+        if pthres is not None:
+            self.pthres = pthres*self.signal_std
+        else:
+            self.pthres = pthres
 
-        for i in range(len(peaks)):
-            try:
-                left_edge, = np.where(np.abs(data_to_despike[peaks[i]-window:peaks[i]]) == \
-                                      np.amin(np.abs(data_to_despike[peaks[i]-window:peaks[i]])))
-                right_edge, = np.where(np.abs(data_to_despike[peaks[i]:peaks[i]+window]) == \
-                                       np.amin(np.abs(data_to_despike[peaks[i]:peaks[i]+window])))
-            except ValueError:
-                left_edge = 0
-                right_edge = 0
+        if thres is not None:
+            self.thres = thres*self.signal_std
+        else:
+            self.thres = thres
+        
+        if width is not None:
+            self.width = width
+        else:
+            self.width = np.array([1,200])
 
-            left_edge += (peaks[i]-window)
-            right_edge += peaks[i]
+        self.idx_peak, self.param_peak = sgn.find_peaks(np.abs(self.signal), height=self.hthres, \
+                                                        prominence=self.pthres, \
+                                                        threshold=self.thres, width=self.width, \
+                                                        rel_height=rel_height)
 
-            ledge = np.append(ledge, left_edge[-1])
-            redge = np.append(redge, right_edge[-1])
+        if full_width:
+            param_temp = sgn.peak_widths(np.abs(self.signal), peaks=self.idx_peak, rel_height=1.)
 
-        return param[0].copy(), ledge, redge
+            ledge = np.append(param_temp[-2][0], np.maximum(param_temp[-2][1:], param_temp[-1][:-1]))
+            redge = np.append(np.minimum(param_temp[-2][1:], param_temp[-1][:-1]), param_temp[-1][-1])
 
-    def replace_peak(self, thres=5, hthres=5, pthres=None, peaks = np.array([]), widths = np.array([0, 10])):
+            self.param_peak['widths'] = param_temp[0]
+            self.param_peak['left_ips'] = ledge
+            self.param_peak['right_ips'] = redge
+
+    def replace_peak(self, peaks=None, ledge=None, redge=None, window=1000):
 
         '''
         This function replaces the spikes data with noise realization. Noise can be gaussian
         or poissonian based on the statistic of the data
-        - widths may be a 1D array with 2 values (the minimum expect width and the maximum expected width) or 
-          None. In this case the width will be computed automatically by the code
+        - peaks: indices of the peaks 
+        - ledge: left edge of the peak width
+        - redge: right edge of the peak width
+        - window: dimension in samples of the data to be analyzed before and after the peak to 
+                  estimate the mean, std and var 
         '''
 
         x_inter = np.array([], dtype = 'int')
 
-        ledge = np.array([], 'int')
-        redge = np.array([], 'int')
-        replaced = self.data.copy()
+        replaced = self.signal.copy()
 
-        if np.size(peaks) == 0:
-            peaks = self.findpeak(thres=thres, hthres=hthres, pthres=pthres)
-        
-        if isinstance(widths, np.ndarray) is False:
-            widths, ledge, redge = self.peak_width(peaks=peaks, thres=thres, hthres=hthres, pthres=pthres)
+        if peaks is None:
+            peaks = self.idx_peak
+
+        if ledge is None:
+            ledge = self.param_peak['left_ips']
         else:
-            ledge = np.ones_like(peaks)*peaks-np.amax(widths)
-
-            if peaks[-1]+np.amax(widths) < len(self.data):
-                redge = np.ones_like(peaks)*peaks+np.amax(widths)
+            if isinstance(ledge, np.ndarray):
+                if len(ledge) != len(peaks):
+                    ledge = peaks-np.amax(ledge)
+                else:
+                    ledge = ledge
             else:
-                for j in range(len(peaks)):
-                    if peaks[j]+np.amax(widths) > len(self.data):
-                        redge = len(self.data)-1
-                    else:
-                        redge = peaks[j]+np.amax(widths)
+                ledge = peaks-np.amax(ledge)            
 
-            ledge = np.floor(ledge).astype(int)
-            redge = np.floor(redge).astype(int)
+        if redge is None:
+            redge = self.param_peak['right_ips']
+        else:
+            if isinstance(redge, np.ndarray):
+                if len(redge) != len(peaks):
+                    redge = peaks+np.amax(redge)
+                else:
+                    redge = redge
+            else:
+                redge = peaks+np.amax(redge)  
+
+            idx_redge, = np.where(redge>peaks[-1])
+
+            redge[idx_redge] = peaks[-1]
+
+        ledge = np.floor(ledge).astype(int)
+        redge = np.ceil(redge).astype(int)
 
         for i in range(0, len(peaks)):
+            
+            idx=np.arange(ledge[i]-1, redge[i]+1) #Added and removed 1 just to consider eventual rounding
+            x_inter = np.append(x_inter, idx)
 
-            x_inter = np.append(x_inter, np.arange(ledge[i], redge[i]))
-            replaced[ledge[i]:redge[i]] = (replaced[ledge[i]]+\
-                                           replaced[redge[i]])/2.
+            array_temp = np.append(replaced[ledge[i]-window-1:ledge[i]-1], \
+                                   replaced[redge[i]+1:redge[i]+window+1])
 
-        val = (replaced-np.mean(replaced))/np.mean(replaced)
+            mean_temp = np.mean(array_temp)
+            std_temp = np.std(array_temp)
+            var_temp = np.var(array_temp)
 
-        final_mean = np.mean(replaced[val<0.3])
-        final_std = np.std(replaced[val<0.3])
-        final_var = np.var(replaced[val<0.3])
+            p_stat = np.abs(np.abs(mean_temp/var_temp)-1.)
 
-        p_stat = np.abs(final_mean/final_var-1.)
-
-        if p_stat <=1e-2:
-            '''
-            This means that the variance and the mean are approximately the 
-            same, so the distribution is Poissonian.
-            '''
-            mu = (final_mean+final_var)/2.
-            y_sub = np.random.poisson(mu, len(x_inter))
-        else:
-            y_sub = np.random.normal(final_mean, final_std, len(x_inter))
-
-        if np.size(y_sub) > 0:
-            replaced[x_inter] = y_sub
+            if p_stat <= 1e-2:
+                val = np.random.poisson(mean_temp, len(idx))
+                replaced[ledge[i]-1:redge[i]+1] = val
+            else:
+                val = np.random.normal(mean_temp, std_temp, len(idx))
+                replaced[ledge[i]-1:redge[i]+1] = val
 
         return replaced
 
@@ -313,9 +261,9 @@ class filterdata():
 
         fft_frequency = np.fft.rfftfreq(np.size(self.data), 1/self.fs)
 
-        vect = np.vectorize(self.cosine_filter)
+        vect = np.vectorize(self.cosine_filter, otypes=[np.float])
 
-        ifft_data = np.fft.irfft(vect(fft_frequency)*fft_data, len(self.data))
+        ifft_data = np.fft.irfft(vect(fft_frequency, filter_type)*fft_data, len(self.data))
 
         return ifft_data
 
@@ -376,10 +324,25 @@ class detector_trend():
     Class to detrend a TOD
     '''
 
-    def __init__(self, data):
-
+    def __init__(self, data, remove_signal=False):
+        
         self.data = data
         self.x = np.arange(len(self.data))
+
+        if remove_signal:
+            signal = despike(data, thres=None, hthres=None, width=250, rel_height=0.75)
+            self.mask = np.zeros_like(data, dtype=bool)
+            ledge = np.floor(signal.param_peak['left_ips']).astype(int)
+            redge = np.floor(signal.param_peak['right_ips']).astype(int)
+            for j in range(len(ledge)):
+                self.mask[ledge[j]:redge[j]] = True
+            self.mask_array = True
+        else:
+            self.mask_array = False
+
+    def sine(self, x, a, b, c, d):
+
+        return a*np.sin(b*x+c)+d
 
     def polyfit(self, y=None, order=6):
 
@@ -390,57 +353,103 @@ class detector_trend():
         if y is None:
             y = self.data
 
-        p = np.polyfit(self.x, y, order)
+        if self.mask_array:
+            masked_array = np.ma.array(y, mask=self.mask)
+            p = np.ma.polyfit(self.x, masked_array, order)
+        else:
+            p = np.polyfit(self.x, y, order)
+        
         poly = np.poly1d(p)
         y_fin = poly(self.x)
 
         return y_fin, p
 
-    def baseline(self, y=None, order=6, iter_val=100, tol=1e-3):
+    def baseline(self, y=None, baseline_type='poly', interpolation_smooth=2.0,\
+                 order=6, iter_val=100, tol=1e-3):
 
         import scipy.linalg as LA
 
         '''
-        Routine to compute the baseline of the timestream. Based on the peakutils package
+        Routine to compute the baseline of the timestream. Based on the peakutils package for the polynomial
         Parameters:
+        - baseline_type: choose the method for the baseline calculation. Either 'poly' for polynomial
+                         or 'inter' for interpolation
+        - interpolation_smooth: order of the interpolation. See scipy.interpolate.UnivariateSpliline 
+                                for the meaning of this parameter
         - order: order of the polynominal
         - iter_val: number of iteration required to find the baseline
         - tol: tolerance to stop the iteration. The tolerance criteria is computed on the 
                coefficents of the polynomial
         '''
 
-        coeffs = np.ones(int(order+1))
-
         if y is None:
             y = self.data
         
-        for i in range(iter_val):
+        if baseline_type.lower() == 'poly':
+            
+            coeffs = np.ones(int(order+1))
 
-            base, coeffs_new = self.polyfit(y=y, order=order)
+            for i in range(iter_val):
 
-            if LA.norm(coeffs_new - coeffs) / LA.norm(coeffs) < tol:
+                base, coeffs_new = self.polyfit(y=y, order=order)
+
+                if LA.norm(coeffs_new - coeffs) / LA.norm(coeffs) < tol:
+                    coeffs = coeffs_new
+                    break
+
                 coeffs = coeffs_new
-                break
+                y = np.minimum(y, base)
 
-            coeffs = coeffs_new
-            y = np.minimum(y, base)
+            poly = np.poly1d(coeffs)
 
-        poly = np.poly1d(coeffs)
+            self.offset = coeffs[-1]
 
-        return poly(self.x)
+            return poly(self.x)
+
+        elif baseline_type.lower() == 'inter':
+
+            points = np.ones(len(y))*np.mean(y)
+
+            for i in range(iter_val):
+                f = interpolate.UnivariateSpline(np.arange(len(y)), y, s=interpolation_smooth)
+                base = f(np.arange(len(y)))
+
+                if np.all(np.abs(base-points)<tol):
+                    break
+
+                y = np.minimum(y, base)
+                points = base
+
+            self.offset = np.mean(base[:1000])
+
+            return base
     
-    def fit_residual(self, order=6, baseline=False):
+    def fit_residual(self, order=6, baseline=False, return_baseline=False, \
+                     baseline_type='poly', interpolation_smooth=2.0,\
+                     iter_val=100, tol=1e-3):
 
         '''
         Function to remove the trend polynomial from the TOD
         '''
-
+        
         if baseline is True:
-            baseline = self.baseline(order=order)
+            baseline = self.baseline(baseline_type=baseline_type, interpolation_smooth=interpolation_smooth, \
+                                     order=order, iter_val=iter_val, tol=tol)
         else:
             baseline = self.polyfit(order=order)[0]
+        
+        if return_baseline:
+            return self.data-baseline, baseline
+        else:
+            return self.data-baseline
 
-        return self.data-baseline
+        def offset_level(self):
+
+            '''
+            Return the offset level of signal after running the baseline calculation
+            '''
+
+            return self.offset
 
 class kidsutils():
 
@@ -464,9 +473,7 @@ class kidsutils():
 
         X = self.I+1j*self.Q
         phi_avg = np.arctan2(np.mean(self.Q),np.mean(self.I))
-        print(phi_avg, np.degrees(phi_avg))
         E = X*np.exp(-1j*phi_avg)
-        print(E)
         self.I_rot = E.real
         self.Q_rot = E.imag
 
