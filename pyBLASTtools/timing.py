@@ -510,7 +510,8 @@ class dirfile_interp():
                     self.time_master = self.time_master[self.idx_start_master:self.idx_end_master]
 
                 elif loading_method.strip().lower() == 'time_val':
-
+                    
+                    
                     self.time_master = self.d_master.getdata('ctime_master_built')
 
                     self.idx_start_master = np.nanargmin(np.abs(self.time_master-time_start))
@@ -524,6 +525,8 @@ class dirfile_interp():
                 self.idx_end_roach = np.nanargmin(np.abs(self.time_roach-self.time_master[-1]-offset))
 
                 self.time_roach = self.time_roach[self.idx_start_roach:self.idx_end_roach]
+                #return the array corrected by the offset 
+                #this is the time array shifted to pointing
                 self.time_roach -= offset
 
             self.d_master.flush('ctime_master_built')
@@ -558,6 +561,9 @@ class dirfile_interp():
                 time_master_new = utils.change_sampling_rate(self.time_master, field_master_array, \
                                                              self.d_master.spf('ctime_master_built'), \
                                                              fs_master)
+
+            else:
+                time_master_new = None
         else:
             spf_ctime = self.d_master.spf('ctime_master_built')
             spf_field = self.d_master.spf(field_master)

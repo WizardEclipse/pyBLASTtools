@@ -329,6 +329,9 @@ class detector_trend():
         self.data = data
         self.x = np.arange(len(self.data))
 
+        if isinstance(self.data, np.ma.core.MaskedArray):
+            self.mask = self.data.mask
+
         if remove_signal:
             signal = despike(data, thres=None, hthres=None, width=250, rel_height=0.75)
             self.mask = np.zeros_like(data, dtype=bool)
@@ -353,7 +356,7 @@ class detector_trend():
         if y is None:
             y = self.data
 
-        if self.mask_array:
+        if self.mask_array or isinstance(y, np.ma.core.MaskedArray):
             masked_array = np.ma.array(y, mask=self.mask)
             p = np.ma.polyfit(self.x, masked_array, order)
         else:
@@ -389,9 +392,15 @@ class detector_trend():
             
             coeffs = np.ones(int(order+1))
 
+            if isinstance(y, np.ma.core.MaskedArray):
+                mask = y.mask
+
             for i in range(iter_val):
 
                 base, coeffs_new = self.polyfit(y=y, order=order)
+
+                if isinstance(y, np.ma.core.MaskedArray):
+                    base = np.ma.array(base, mask=mask)
 
                 if LA.norm(coeffs_new - coeffs) / LA.norm(coeffs) < tol:
                     coeffs = coeffs_new

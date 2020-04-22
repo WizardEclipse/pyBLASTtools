@@ -63,7 +63,8 @@ class utils(object):
         elif radec_frame.lower() == 'j2000':
             self.radec_frame = FK5(equinox='j2000')
         elif radec_frame.lower() == 'current':
-            self.radec_frame = FK5(equinox=self.time)
+            time_epoch = np.mean(time)
+            self.radec_frame = FK5(equinox=Time(time_epoch*time_unit, format='unix', scale='utc'))
         else:
             self.radec_frame = radec_frame
 
@@ -105,13 +106,14 @@ class utils(object):
         if self.system == 'celestial':
             coord = self.coordinates
         elif self.system == 'horizontal':
-            coord = self.sky2horizontal()
+            coord_temp = self.horizontal2sky()
+            coord = SkyCoord(coord_temp[0], coord_temp[1], unit=u.degree, frame=self.radec_frame)
 
         LST = self.time.sidereal_time('mean', longitude=self.location.lon)
-        H = (LST - coord.ra.hourangle).radian
+        H = (LST - coord.ra).radian
         q = np.arctan2(np.sin(H),
-                       (np.tan(self.location.lat.radians)*np.cos(coord.dec.radians)-\
-                        np.sin(coord.dec.radians)*np.cos(H)))
+                       (np.tan(self.location.lat.radian)*np.cos(coord.dec.radian)-\
+                        np.sin(coord.dec.radian)*np.cos(H)))
 
         return np.degrees(q) 
 

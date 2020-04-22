@@ -4,7 +4,7 @@ import numpy as np
 import pyBLASTtools.mapmaker as mp
 
 
-def plot_map(map_value, projection, idxpixel, title=None, centroid=None, save=False, save_path=None):
+def plot_map(map_value, projection, idxpixel, title=None, centroid=None, save=False, save_path=None, dpi=250):
 
     wcs_proj = mp.wcs_world(projection.wcs.ctype, projection.wcs.crpix, projection.wcs.cdelt, \
                             projection.wcs.crval, projection.wcs.radesys, projection.wcs.equinox)
@@ -45,7 +45,7 @@ def plot_map(map_value, projection, idxpixel, title=None, centroid=None, save=Fa
         plt.title(title)  
 
     if save:        
-        plt.savefig(save_path, dpi=120)
+        plt.savefig(save_path, dpi=dpi, bbox_inches='tight')
         plt.close()
     
 

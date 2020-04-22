@@ -18,12 +18,14 @@ def change_sampling_rate(field1, field2, fs1, fs2, interpolation_kind='linear'):
 
     return field1_new
 
-def remove_drift(field, field_ref, f, f_ref):
+def remove_drift(field, field_ref, f, f_ref, intercept_ref=True):
 
     '''
     Function to remove the drift from the a particular field. 
     It uses a reference field, field_ref, and the sampling frequencies 
     for both fields
+    Parameters:
+    - intercept_ref: choose if use the intercept from the reference field 
     '''
 
     poly = np.polyfit(np.arange(len(field))/f, field, deg=1)
@@ -36,8 +38,15 @@ def remove_drift(field, field_ref, f, f_ref):
 
     poly_ref = np.polyfit(np.arange(len(field_ref))/f_ref, field_ref, deg=1)
 
-    poly_mixed = np.array([poly_ref[0], poly[1]])
-    poly_coeff_mixed = np.poly1d(poly_mixed)
-    field_fit_mixed = poly_coeff_mixed(np.arange(len(field))/f)
+    if intercept_ref:
+        poly_coeff_ref = np.poly1d(poly_ref)
+        field_fit_ref = poly_coeff_ref(np.arange(len(field))/f)
 
-    return field-field_fit+field_fit_mixed
+        return field-field_fit+field_fit_ref
+
+    else:
+        poly_mixed = np.array([poly_ref[0], poly[1]])
+        poly_coeff_mixed = np.poly1d(poly_mixed)
+        field_fit_mixed = poly_coeff_mixed(np.arange(len(field))/f)
+
+        return field-field_fit+field_fit_mixed
