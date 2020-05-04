@@ -92,6 +92,9 @@ class despike():
             self.param_peak['left_ips'] = ledge
             self.param_peak['right_ips'] = redge
 
+        self.param_peak['left_ips'] = (np.floor(self.param_peak['left_ips'])).astype(int)
+        self.param_peak['right_ips'] = (np.floor(self.param_peak['right_ips'])).astype(int)
+
     def replace_peak(self, peaks=None, ledge=None, redge=None, window=1000):
 
         '''
