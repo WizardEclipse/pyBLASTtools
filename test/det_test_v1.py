@@ -1,11 +1,12 @@
 import pyBLASTtools as pbt
 import numpy as np
 import matplotlib.pyplot as plt
+import os,sys
 
-roach_num = 2
+roach_num = int(sys.argv[1])
 if roach_num == 1:
     array = "500"
-    float_chans = 380
+    float_chans = 381
 elif roach_num == 2:
     array = "250V"
     float_chans = 474
@@ -17,7 +18,7 @@ elif roach_num == 4:
     float_chans = 498
 elif roach_num == 5:
     array = "250W"
-    float_chans = 450
+    float_chans = 511
 
 flight_targ = np.load("flight_targ_rel_paths.npy")
 flight_targ = flight_targ.astype("str")
@@ -31,7 +32,7 @@ hard_drive_path = "/media/adrian/blast2020fc1/"
 det = pbt.detector.kidsutils()
 
 channel_number = 40
-# get timestreams for specific channel, start_samp and stop_samp are roach indices.
+# get timestreams for all channels, start_samp and stop_samp are roach indices.
 I_chan, Q_chan = det.getAllTs(hard_drive_path + flight_chop_ts[roach_num-1],roach_num,float_chans,start_samp = 32780000, stop_samp=32780000+4869)
 Z = I_chan + 1j*Q_chan
 # get target sweep for all channels
