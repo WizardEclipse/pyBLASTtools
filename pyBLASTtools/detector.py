@@ -473,12 +473,61 @@ class kidsutils():
 
     def __init__(self, **kwargs):
 
+        '''
+        Possible arguments:
+        - I: I of a detector as an array
+        - Q: Q of a detector as an array
+        - data_dir: directory with the detector data
+        - roach_num: roach number of the detectors to be loaded
+        - single: the channel parameter is intended as single channel or the upper value of 
+                  all the channels to be loaded
+        - chan: a single float number that can be interpreted as the channel to be loaded 
+                or as the upper value of a list of channel to be loaded
+        - first_sample: first sample of the TOD to be read
+        - last_sample: last sample of the TOD to be read
+        '''
+
         self.I = kwargs.get('I')
         self.Q = kwargs.get('Q')
+
+        if self.I is None and self.Q is None:
+            data_dir = kwargs.get('data_dir')
+            roach_num = kwargs.get('roach_num')
+            single = kwargs.get('single', False)
+            chan = kwargs.get('chan')
+            first_sample = kwargs.get('first_sample')
+            last_sample = kwargs.get('last_sample')
+
+            if (data_dir is not None and roach_num is not None and single is not None and \
+                chan is not None and first_sample is not None and last_sample is not None):
+
+                self.getTs(data_dir, roach_num, single, chan, first_sample, last_sample)
 
         if self.I is not None and self.Q is not None:
             self.phase = self.KIDphase()
             self.mag = self.KIDmag()
+    
+    def getTs(self, data_dir, roach_num, single, chan, start_samp, stop_samp):
+        fdir = gd.dirfile(data_dir)
+        if single:
+            self.I = fdir.getdata("i_kid"+"%04d" % (chan,)+"_roach"+str(roach_num), \
+                                  first_sample = start_samp,num_samples=int(stop_samp-start_samp))
+            self.Q = fdir.getdata("q_kid"+"%04d" % (chan,)+"_roach"+str(roach_num), \
+                                  first_sample = start_samp,num_samples=int(stop_samp-start_samp))
+        else:
+            self.I = np.array([])
+            self.Q = np.array([])
+            for i in range(chan):
+                I_temp = fdir.getdata("i_kid"+"%04d" % (i,)+"_roach"+str(roach_num),\
+                                      first_sample = start_samp,num_samples=int(stop_samp-start_samp))
+                Q_temp = fdir.getdata("q_kid"+"%04d" % (i,)+"_roach"+str(roach_num),\
+                                      first_sample = start_samp,num_samples=int(stop_samp-start_samp))
+                if i == 0:
+                    self.I = I_temp
+                    self.Q = Q_temp
+                else:
+                    self.I = np.vstack((self.I, I_temp))
+                    self.Q = np.vstack((self.Q, Q_temp))
 
     def rotatePhase(self):
 
@@ -541,22 +590,6 @@ class kidsutils():
         except ValueError:
             return chan_I, chan_Q
         return chan_I, chan_Q
-
-    def getTs(self,data_dir, roach_num,chan,start_samp, stop_samp):
-        fdir = gd.dirfile(data_dir)
-        I_chanN = fdir.getdata("i_kid"+"%04d" % (chan,)+"_roach"+str(roach_num),first_sample = start_samp,num_samples=(stop_samp-start_samp))
-        Q_chanN = fdir.getdata("q_kid"+"%04d" % (chan,)+"_roach"+str(roach_num),first_sample = start_samp,num_samples=(stop_samp-start_samp))
-        return I_chanN, Q_chanN
-
-    def getAllTs(self,data_dir,roach_num,num_channels,start_samp, stop_samp):
-        fdir = gd.dirfile(data_dir)
-        Iall, Qall = [], []
-        for i in range(num_channels):
-            I_chanN = fdir.getdata("i_kid"+"%04d" % (i,)+"_roach"+str(roach_num),first_sample = start_samp,num_samples=(stop_samp-start_samp))
-            Q_chanN = fdir.getdata("q_kid"+"%04d" % (i,)+"_roach"+str(roach_num),first_sample = start_samp,num_samples=(stop_samp-start_samp))
-            Iall.append(I_chanN)
-            Qall.append(Q_chanN)
-        return np.array(Iall), np.array(Qall)
 
     def get_df_gradients(self, chan, s21_f, timestream, shift_idx = 2):
         """
