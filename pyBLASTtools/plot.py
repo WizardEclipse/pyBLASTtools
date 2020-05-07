@@ -6,21 +6,25 @@ import pyBLASTtools.mapmaker as mp
 
 def plot_map(map_value, projection, idxpixel, title=None, centroid=None, save=False, save_path=None, dpi=250):
 
-    wcs_proj = mp.wcs_world(projection.wcs.ctype, projection.wcs.crpix, projection.wcs.cdelt, \
-                            projection.wcs.crval, projection.wcs.radesys, projection.wcs.equinox)
-
     if list(projection.wcs.ctype) == ['RA---TAN', 'DEC--TAN']:
         string_x = 'RA (deg)'
         string_y = 'DEC (deg)'
+        telcoord=False
     elif list(projection.wcs.ctype) == ['TLON-ARC', 'TLAT-ARC']:
         string_x = 'AZ (deg)'
         string_y = 'EL (deg)'
+        telcoord=False
     elif list(projection.wcs.ctype) == ['TLON-CAR', 'TLAT-CAR']:
         string_x = 'xEL (deg)'
         string_y = 'EL (deg)'
+        telcoord=False
     elif list(projection.wcs.ctype) == ['TLON-TAN', 'TLAT-TAN']:
-        string_x = 'RA_proj (deg)'
+        string_x = 'xDEC_proj (deg)'
         string_y = 'DEC_proj (deg)'
+        telcoord=True
+
+    wcs_proj = mp.wcs_world(projection.wcs.ctype, projection.wcs.crpix, projection.wcs.cdelt, \
+                            projection.wcs.crval, telcoord)
 
     proj_plot = wcs_proj.reproject(idxpixel)
 

@@ -7,3 +7,4 @@ import pyBLASTtools.quaternion
 import pyBLASTtools.mapmaker
 import pyBLASTtools.plot
 import pyBLASTtools.utils
+import pyBLASTtools.beam

@@ -3,7 +3,7 @@ import gc
 from astropy import wcs
 import astropy.units as u
 from astropy.coordinates import EarthLocation, AltAz, FK5, ICRS, SkyCoord
-from astropy.time import Time
+from astropy.time import Time, core
 
 import pyBLASTtools.quaternion as quat
 
@@ -14,57 +14,90 @@ class utils(object):
     useful astronomical quantities
     '''
 
-    def __init__(self, lon, lat, height, time, ra=None, dec=None, az=None, alt=None, \
-                 radec_frame='current', coord1_unit=u.degree, coord2_unit=u.degree, lon_unit=u.degree, \
-                 lat_unit=u.degree, height_unit=u.m, time_unit=u.s):
+    def __init__(self, **kwargs):
 
+        '''
+        Possible arguments:
+        - lon: Longitude (in degrees otherwise specify lon_unit as an astropy unit)
+        - lat: Latitude (in degrees otherwise specify lat_unit as an astropy unit)
+        - height: Altitude (in meters otherwise specify height_unit as an astropy unit)
+        - time: time of the observation in unix format and in seconds or as an astropy.time.core.Time object
+        - ra: Right ascension (in degrees otherwise specify coord1_unit as an astropy unit)
+        - dec: Declination (in degrees otherwise specify coord2_unit as an astropy unit)
+        - az: Azimuth (in degrees otherwise specify coord1_unit as an astropy unit)
+        - alt: Elevation (in degrees otherwise specify coord2_unit as an astropy unit)
+        - radec_frame: Frame of the Equatorial system, ICRS, current or J2000. Default is current if
+                       a time is defined, otherwise is J2000
+        '''
+
+        ra = kwargs.get('ra')
+        dec = kwargs.get('dec')
         if ra is not None and dec is not None:
             self.system = 'celestial'
             coord1 = ra
             coord2 = dec
 
+        az = kwargs.get('az')
+        alt = kwargs.get('alt')
         if az is not None and alt is not None:
             self.system = 'horizontal'
             coord1 = az
             coord2 = alt
 
+        coord1_unit = kwargs.get('coord1_unit', u.degree)
         if isinstance(coord1, u.quantity.Quantity):
             self.coord1 = coord1
         else:
             self.coord1 = coord1*coord1_unit
 
+        coord2_unit = kwargs.get('coord2_unit', u.degree)
         if isinstance(coord2, u.quantity.Quantity):
             self.coord2 = coord2
         else:
             self.coord2 = coord2*coord2_unit
 
+        lon = kwargs.get('lon')
+        lon_unit = kwargs.get('lon_unit', u.degree)
         if isinstance(lon, u.quantity.Quantity):
             self.lon = lon
         else:
             self.lon = lon*lon_unit
 
+        lat = kwargs.get('lat')
+        lat_unit = kwargs.get('lat_unit', u.degree)
         if isinstance(lat, u.quantity.Quantity):
             self.lat = lat
         else:
             self.lat = lat*lat_unit
 
+        height = kwargs.get('height', 0.)
+        height_unit = kwargs.get('height_unit', u.meter)
         if isinstance(height, u.quantity.Quantity):
             self.height = height
         else:
             self.height = height*height_unit
 
-        if isinstance(time, u.quantity.Quantity):
-            self.time = Time(time, format='unix', scale='utc')
+        time = kwargs.get('time')
+        if isinstance(time, core.Time):
+            self.time = Time
         else:
-            self.time = Time(time*time_unit, format='unix', scale='utc')
+            if time is not None:
+                self.time = Time(time*u.s, format='unix', scale='utc')
+            else:
+                self.time = Time('J2000')
+
+        if time is not None:
+            radec_frame = kwargs.get('radec_frame', 'current')
+        else:
+            radec_frame = 'j2000'
 
         if radec_frame.lower() == 'icrs':
             self.radec_frame = ICRS()
         elif radec_frame.lower() == 'j2000':
             self.radec_frame = FK5(equinox='j2000')
         elif radec_frame.lower() == 'current':
-            time_epoch = np.mean(time)
-            self.radec_frame = FK5(equinox=Time(time_epoch*time_unit, format='unix', scale='utc'))
+            time_epoch = np.mean(self.time.unix)
+            self.radec_frame = FK5(equinox=Time(time_epoch, format='unix', scale='utc'))
         else:
             self.radec_frame = radec_frame
 
@@ -83,9 +116,9 @@ class utils(object):
         Convert horizontal coordinates to sky coordinates using astropy routines
         '''
 
-        temp = self.coordinates.transform_to(self.radec_frame)
+        self.radec_coord = self.coordinates.transform_to(self.radec_frame)
 
-        return temp.ra.deg, temp.dec.deg
+        return self.radec_coord.ra.deg, self.radec_coord.dec.deg
 
     def sky2horizontal(self):
 
@@ -93,9 +126,9 @@ class utils(object):
         Convert sky coordinates to horizontal coordinates using astropy routines
         '''
 
-        temp = self.coordinates.transform_to(self.altaz_frame)
+        self.altaz_coord = self.coordinates.transform_to(self.altaz_frame)
 
-        return temp.az.deg, temp.alt.deg
+        return self.altaz_coord.az.deg, self.altaz_coord.alt.deg
 
     def parallactic_angle(self):
         
@@ -106,8 +139,11 @@ class utils(object):
         if self.system == 'celestial':
             coord = self.coordinates
         elif self.system == 'horizontal':
-            coord_temp = self.horizontal2sky()
-            coord = SkyCoord(coord_temp[0], coord_temp[1], unit=u.degree, frame=self.radec_frame)
+            try:
+                coord = self.radec_coord
+            except AttributeError:
+                coord_temp = self.horizontal2sky()
+                coord = SkyCoord(coord_temp[0], coord_temp[1], unit=u.degree, frame=self.radec_frame)
 
         LST = self.time.sidereal_time('mean', longitude=self.location.lon)
         H = (LST - coord.ra).radian
@@ -117,18 +153,35 @@ class utils(object):
 
         return np.degrees(q) 
 
-class convert_to_telescope(object):
+class convert_to_telescope():
 
     '''
-    Class to convert from sky equatorial coordinates to telescope coordinates
+    Class to convert from sky equatorial coordinates to telescope coordinates using a tangential projection
     '''
 
-    def __init__(self, coord1, coord2, lst, lat):
+    def __init__(self, coord1, coord2, **kwargs):
 
-        self.coord1 = coord1           #RA, needs to be in hours       
-        self.coord2 = coord2           #DEC
-        self.lst = lst 
-        self.lat = lat
+        self.coord1 = coord1           #RA in degrees       
+        self.coord2 = coord2           #DEC in degrees
+        
+        self.pa = kwargs.get('pa')
+
+        if self.pa is None:
+            self.lon = kwargs.get('lon') 
+            self.lat = kwargs.get('lat')
+            self.time = kwargs.get('time')
+            
+            if self.lon is not None and self.lat is not None and self.time is not None:
+
+                parang = utils(ra=self.coord1, dec=self.coord2, lon=self.lon, lat=self.lat, time=self.time)
+                self.pa = np.radians(parang.parallactic_angle())
+            else:
+                self.pa = np.zeros_like(self.coord1)
+
+        else:
+            self.pa = np.radians(self.pa)
+
+        self.crval = kwargs.get('crval', np.array([np.median(self.coord1), np.median(self.coord2)]))
 
     def conversion(self):
 
@@ -136,11 +189,17 @@ class convert_to_telescope(object):
         This function rotates the coordinates projected on the plane using the parallactic angle
         '''
         
-        parang = utils(self.coord1, self.coord2, self.lst, self.lat)
-        pa = np.radians(parang.parallactic_angle())
+        den = (np.sin(np.radians(self.coord2))*np.sin(np.radians(self.crval[1]))+\
+               np.cos(np.radians(self.coord2))*np.cos(np.radians(self.crval[1]))*\
+               np.cos(np.radians(self.coord1-self.crval[0])))
 
-        x_tel = np.radians(self.coord1*15)*np.cos(pa)-np.radians(self.coord2)*np.sin(pa)
-        y_tel = np.radians(self.coord2)*np.cos(pa)+np.radians(self.coord1*15)*np.sin(pa)
+        x_proj = (np.cos(np.radians(self.coord2))*np.sin(np.radians(self.coord1-self.crval[0])))/den
+        y_proj = (np.sin(np.radians(self.coord2))*np.cos(np.radians(self.crval[1]))-\
+                  np.cos(np.radians(self.coord2))*np.sin(np.radians(self.crval[1]))*\
+                  np.cos(np.radians(self.coord1-self.crval[0])))/den
+
+        x_tel = x_proj*np.cos(self.pa)-y_proj*np.sin(self.pa)
+        y_tel = y_proj*np.cos(self.pa)+x_proj*np.sin(self.pa)
 
         return np.degrees(x_tel), np.degrees(y_tel)
 

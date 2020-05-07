@@ -1,7 +1,8 @@
 import numpy as np
 import scipy.signal as sgn
 import pygetdata as gd
-import sys, os
+import sys
+import os
 from scipy import interpolate
 
 class Error(Exception):
@@ -173,7 +174,7 @@ class filterdata():
     class for filter the detector TOD
     '''
 
-    def __init__(self, data, cutoff, fs):
+    def __init__(self, data, cutoff, fs=None):
         
         '''
         See data_cleaned for parameters explanantion
@@ -181,7 +182,10 @@ class filterdata():
 
         self.data = data
         self.cutoff = cutoff
-        self.fs = fs
+        if fs is None:
+            self.fs = 488.28125
+        else:
+            self.fs = fs
     
     def butter_filter(self, order, filter_type='highpass'):
 
@@ -197,10 +201,7 @@ class filterdata():
             print('The filter type choosen is not correct. Choose between highpass and lowpass')
             sys.exit(1)
         
-        nyq = 0.5*self.fs
-        normal_cutoff = self.cutoff / nyq
-        b, a = sgn.butter(order, normal_cutoff, btype=filter_type, analog=False)
-        return b, a
+        return sgn.butter(order, self.cutoff, btype=filter_type, analog=False, output='sos')
 
     def butter_filter_data(self, order=5, filter_type='highpass'):
 
@@ -208,8 +209,8 @@ class filterdata():
         Data filtered with a butterworth filter 
         order parameter is the order of the butterworth filter
         '''
-        b, a = self.butter_filter(order, filter_type)
-        filterdata = sgn.lfilter(b, a, self.data)
+        sos = self.butter_filter(order, filter_type)
+        filterdata = sgn.sosfiltfilt(sos, self.data)
         return filterdata
 
     def cosine_filter(self, f, filter_type='highpass'):
@@ -470,14 +471,14 @@ class kidsutils():
     Class containing useful functions for KIDs
     '''
 
-    def __init__(self): #, I, Q):
+    def __init__(self, **kwargs):
 
-        #self.I = I
-        #self.Q = Q
+        self.I = kwargs.get('I')
+        self.Q = kwargs.get('Q')
 
-        #self.phase = self.KIDphase()
-        #self.mag = self.KIDmag()
-        return
+        if self.I is not None and self.Q is not None:
+            self.phase = self.KIDphase()
+            self.mag = self.KIDmag()
 
     def rotatePhase(self):
 
@@ -513,33 +514,33 @@ class kidsutils():
         return np.sqrt(self.I**2+self.Q**2)
 
     def loadBinarySweepData(self,path_to_sweep, vna = True):
-      """
-      From plotPipeline.py - Sam Gordon
-      """
-      try:
-        all_files = (os.listdir(path_to_sweep))
-        sweep_freqs = np.loadtxt(os.path.join(path_to_sweep, "sweep_freqs.dat"), dtype = "float")
-        if vna:
-          dac_freqs = np.loadtxt(os.path.join(path_to_sweep, "vna_freqs.dat"), dtype = "float")
-        else:
-          dac_freqs = np.loadtxt(os.path.join(path_to_sweep, "bb_targ_freqs.dat"), dtype = "float")
-        chan_I = np.zeros((len(sweep_freqs),len(dac_freqs)))
-        chan_Q = np.zeros((len(sweep_freqs),len(dac_freqs)))
-        bin_files = []
-        for filename in all_files:
-          if filename.endswith('0.dat'):
-            bin_files.append(os.path.join(path_to_sweep, filename))
-        bin_files = sorted(bin_files)
-        for i in range(len(sweep_freqs)):
-          name = str(int(sweep_freqs[i])) +'.dat'
-          file_path = os.path.join(path_to_sweep, name)
-          raw = open(file_path, 'rb')
-          data = np.fromfile(raw,dtype = '<f')
-          chan_I[i] = data[::2]
-          chan_Q[i] = data[1::2]
-      except ValueError:
+        """
+        From plotPipeline.py - Sam Gordon
+        """
+        try:
+            all_files = (os.listdir(path_to_sweep))
+            sweep_freqs = np.loadtxt(os.path.join(path_to_sweep, "sweep_freqs.dat"), dtype = "float")
+            if vna:
+                dac_freqs = np.loadtxt(os.path.join(path_to_sweep, "vna_freqs.dat"), dtype = "float")
+            else:
+                dac_freqs = np.loadtxt(os.path.join(path_to_sweep, "bb_targ_freqs.dat"), dtype = "float")
+            chan_I = np.zeros((len(sweep_freqs),len(dac_freqs)))
+            chan_Q = np.zeros((len(sweep_freqs),len(dac_freqs)))
+            bin_files = []
+            for filename in all_files:
+                if filename.endswith('0.dat'):
+                    bin_files.append(os.path.join(path_to_sweep, filename))
+            bin_files = sorted(bin_files)
+            for i in range(len(sweep_freqs)):
+                name = str(int(sweep_freqs[i])) +'.dat'
+            file_path = os.path.join(path_to_sweep, name)
+            raw = open(file_path, 'rb')
+            data = np.fromfile(raw,dtype = '<f')
+            chan_I[i] = data[::2]
+            chan_Q[i] = data[1::2]
+        except ValueError:
+            return chan_I, chan_Q
         return chan_I, chan_Q
-      return chan_I, chan_Q
 
     def getTs(self,data_dir, roach_num,chan,start_samp, stop_samp):
         fdir = gd.dirfile(data_dir)
@@ -547,58 +548,58 @@ class kidsutils():
         Q_chanN = fdir.getdata("q_kid"+"%04d" % (chan,)+"_roach"+str(roach_num),first_sample = start_samp,num_samples=(stop_samp-start_samp))
         return I_chanN, Q_chanN
 
-    def getAllTs(self,data_dir, roach_num,num_channels,start_samp, stop_samp):
+    def getAllTs(self,data_dir,roach_num,num_channels,start_samp, stop_samp):
         fdir = gd.dirfile(data_dir)
         Iall, Qall = [], []
         for i in range(num_channels):
-          I_chanN = fdir.getdata("i_kid"+"%04d" % (i,)+"_roach"+str(roach_num),first_sample = start_samp,num_samples=(stop_samp-start_samp))
-          Q_chanN = fdir.getdata("q_kid"+"%04d" % (i,)+"_roach"+str(roach_num),first_sample = start_samp,num_samples=(stop_samp-start_samp))
-          Iall.append(I_chanN)
-          Qall.append(Q_chanN)
+            I_chanN = fdir.getdata("i_kid"+"%04d" % (i,)+"_roach"+str(roach_num),first_sample = start_samp,num_samples=(stop_samp-start_samp))
+            Q_chanN = fdir.getdata("q_kid"+"%04d" % (i,)+"_roach"+str(roach_num),first_sample = start_samp,num_samples=(stop_samp-start_samp))
+            Iall.append(I_chanN)
+            Qall.append(Q_chanN)
         return np.array(Iall), np.array(Qall)
 
     def get_df_gradients(self, chan, s21_f, timestream, shift_idx = 2):
-      """
-      Calculate delta f timestream and return both frequency and dissipation direction timestreams
-      """
-      delta_f = 1000.0 # Hz
-      dI, dQ = np.diff(s21_f.real[chan]), np.diff(s21_f.imag[chan])
-      dIdf, dQdf = dI/delta_f, dQ/delta_f
-      Mag = np.sqrt(s21_f.real[chan]**2+s21_f.imag[chan]**2)
-      dMag = np.sqrt(dIdf**2+dQdf**2)
-      max_idx = np.where(dMag==max(dMag))[0][0]
-      min_idx = np.where(Mag==min(Mag))[0][0]
-      I, Q = timestream.real[chan], timestream.imag[chan]
-      df_x = np.copy((I*dIdf[min_idx+shift_idx] + Q*dQdf[min_idx+shift_idx])/dMag[min_idx+shift_idx]**2)
-      df_y  = np.copy((Q*dIdf[min_idx+shift_idx] - I*dQdf[min_idx+shift_idx])/dMag[min_idx+shift_idx]**2)
-      return df_x,df_y
+        """
+        Calculate delta f timestream and return both frequency and dissipation direction timestreams
+        """
+        delta_f = 1000.0 # Hz
+        dI, dQ = np.diff(s21_f.real[chan]), np.diff(s21_f.imag[chan])
+        dIdf, dQdf = dI/delta_f, dQ/delta_f
+        Mag = np.sqrt(s21_f.real[chan]**2+s21_f.imag[chan]**2)
+        dMag = np.sqrt(dIdf**2+dQdf**2)
+        max_idx = np.where(dMag==max(dMag))[0][0]
+        min_idx = np.where(Mag==min(Mag))[0][0]
+        I, Q = timestream.real[chan], timestream.imag[chan]
+        df_x = np.copy((I*dIdf[min_idx+shift_idx] + Q*dQdf[min_idx+shift_idx])/dMag[min_idx+shift_idx]**2)
+        df_y  = np.copy((Q*dIdf[min_idx+shift_idx] - I*dQdf[min_idx+shift_idx])/dMag[min_idx+shift_idx]**2)
+        return df_x,df_y
 
     def get_all_df_gradients(self, s21_f, timestream, shift_idx = 2):
-      """
-      Calculate delta f timestream and return both frequency and dissipation direction timestreams
-      """
-      delta_f = 1000.0 # Hz
-      num_channels = len(timestream) 
-      dI, dQ = np.diff(s21_f.real), np.diff(s21_f.imag)
-      dIdf, dQdf = dI/delta_f, dQ/delta_f
-      Mag = np.sqrt(s21_f.real**2+s21_f.imag**2)
-      Mag = np.delete(Mag,len(Mag[0])-1,1)
-      dMag = np.sqrt(dIdf**2+dQdf**2)
-      # roll by shift_idx
-      dIdf, dQdf, dMag = np.roll(dIdf,-shift_idx), np.roll(dQdf,-shift_idx), np.roll(dMag,-shift_idx)
-      # Find max/min for each channel
-      min_indices, max_indices = np.zeros(num_channels).astype("int"), np.zeros(num_channels).astype("int")
-      dIdf_min, dQdf_min, dMag_min = np.zeros(len(dIdf)), np.zeros(len(dIdf)), np.zeros(len(dIdf))
-      for i in range(num_channels):
-        min_idx = np.where(Mag[i]==min(Mag[i]))[0][0]
-        min_indices[i] = min_idx
-        dIdf_min[i] = dIdf[i][min_indices[i]]
-        dQdf_min[i] = dQdf[i][min_indices[i]]
-        dMag_min[i] = dMag[i][min_indices[i]]
-      I, Q = timestream.real, timestream.imag
-      df_x = np.copy((I.T*dIdf_min + Q.T*dQdf_min)/dMag_min**2).T
-      df_y  = np.copy((Q.T*dIdf_min - I.T*dQdf_min)/dMag_min**2).T
-      return df_x, df_y 
+        """
+        Calculate delta f timestream and return both frequency and dissipation direction timestreams
+        """
+        delta_f = 1000.0 # Hz
+        num_channels = len(timestream) 
+        dI, dQ = np.diff(s21_f.real), np.diff(s21_f.imag)
+        dIdf, dQdf = dI/delta_f, dQ/delta_f
+        Mag = np.sqrt(s21_f.real**2+s21_f.imag**2)
+        Mag = np.delete(Mag,len(Mag[0])-1,1)
+        dMag = np.sqrt(dIdf**2+dQdf**2)
+        # roll by shift_idx
+        dIdf, dQdf, dMag = np.roll(dIdf,-shift_idx), np.roll(dQdf,-shift_idx), np.roll(dMag,-shift_idx)
+        # Find max/min for each channel
+        min_indices, max_indices = np.zeros(num_channels).astype("int"), np.zeros(num_channels).astype("int")
+        dIdf_min, dQdf_min, dMag_min = np.zeros(len(dIdf)), np.zeros(len(dIdf)), np.zeros(len(dIdf))
+        for i in range(num_channels):
+            min_idx = np.where(Mag[i]==min(Mag[i]))[0][0]
+            min_indices[i] = min_idx
+            dIdf_min[i] = dIdf[i][min_indices[i]]
+            dQdf_min[i] = dQdf[i][min_indices[i]]
+            dMag_min[i] = dMag[i][min_indices[i]]
+        I, Q = timestream.real, timestream.imag
+        df_x = np.copy((I.T*dIdf_min + Q.T*dQdf_min)/dMag_min**2).T
+        df_y  = np.copy((Q.T*dIdf_min - I.T*dQdf_min)/dMag_min**2).T
+        return df_x, df_y 
 
     def despike_targs(self, I_targ, Q_targ,std=5,W=0.1):
         I_targ_ds,Q_targ_ds = [],[] 
@@ -608,8 +609,12 @@ class kidsutils():
             I, Q = I[I_idx],Q[I_idx]
             Q_idx = self.removeStd(Q,s=std)
             I, Q = I[Q_idx],Q[Q_idx]
-            I_ds_f = self.butter(I,N=4,Wn=W,typ="low") 
-            Q_ds_f = self.butter(Q,N=4,Wn=W,typ="low")
+
+            I_filt = filterdata(I, W)
+            Q_filt = filterdata(Q, W)
+
+            I_ds_f = I_filt.butter_filter_data(order=4, filter_type="highpass") 
+            Q_ds_f = Q_filt.butter_filter_data(order=4, filter_type="highpass")
             Q_targ_ds.append(Q_ds_f)
             I_targ_ds.append(I_ds_f)
         return np.array(I_targ_ds), np.array(Q_targ_ds)
