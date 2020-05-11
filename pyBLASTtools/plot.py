@@ -9,22 +9,11 @@ def plot_map(map_value, projection, idxpixel, title=None, centroid=None, save=Fa
     if list(projection.wcs.ctype) == ['RA---TAN', 'DEC--TAN']:
         string_x = 'RA (deg)'
         string_y = 'DEC (deg)'
-        telcoord=False
-    elif list(projection.wcs.ctype) == ['TLON-ARC', 'TLAT-ARC']:
-        string_x = 'AZ (deg)'
-        string_y = 'EL (deg)'
-        telcoord=False
     elif list(projection.wcs.ctype) == ['TLON-CAR', 'TLAT-CAR']:
-        string_x = 'xEL (deg)'
-        string_y = 'EL (deg)'
-        telcoord=False
-    elif list(projection.wcs.ctype) == ['TLON-TAN', 'TLAT-TAN']:
-        string_x = 'xDEC_proj (deg)'
-        string_y = 'DEC_proj (deg)'
-        telcoord=True
+        string_x = 'Yaw (deg)'
+        string_y = 'Pitch (deg)'
 
-    wcs_proj = mp.wcs_world(projection.wcs.ctype, projection.wcs.crpix, projection.wcs.cdelt, \
-                            projection.wcs.crval, telcoord)
+    wcs_proj = mp.wcs_world(wcs=projection)
 
     proj_plot = wcs_proj.reproject(idxpixel)
 
@@ -36,7 +25,7 @@ def plot_map(map_value, projection, idxpixel, title=None, centroid=None, save=Fa
 
     if centroid is not None:
         ax.plot(centroid[0]-np.floor(np.amin(idxpixel[:,0])), \
-                centroid[1]-np.floor(np.amin(idxpixel[:,1])), 'x', c='red', transform=ax.get_transform('pixel'))
+                centroid[1]-np.floor(np.amin(idxpixel[:,1])), 'x', c='red')
 
     c1 = ax.coords[0]           
     c2 = ax.coords[1]

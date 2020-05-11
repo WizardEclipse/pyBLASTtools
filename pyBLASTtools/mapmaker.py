@@ -11,27 +11,31 @@ class wcs_world():
     def __init__(self, **kwargs):
 
         # Build a WCS system 
-        self.w = wcs.WCS(naxis=2)
-        self.w.wcs.crpix = kwargs.get('crpix')
-        self.w.wcs.cdelt = kwargs.get('cdelt')
-        self.w.wcs.crval = kwargs.get('crval', np.zeros(2))
 
-        telcoord = kwargs.get('telcoord', False)
+        self.w = kwargs.get('wcs')
         
-        if telcoord is False:
-            self.w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-        else:
-            self.w.wcs.ctype = ["TLON-CAR", "TLAT-CAR"]
-            for i in range(len(self.w.wcs.crval)):
-                if self.w.wcs.crval[i] != 0:
-                    self.w.wcs.crval[i] = 0
+        if self.w is None:
+            self.w = wcs.WCS(naxis=2)
+            self.w.wcs.crpix = kwargs.get('crpix')
+            self.w.wcs.cdelt = kwargs.get('cdelt')
+            self.w.wcs.crval = kwargs.get('crval', np.zeros(2))
+
+            telcoord = kwargs.get('telcoord', False)
+            
+            if telcoord is False:
+                self.w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+            else:
+                self.w.wcs.ctype = ["TLON-CAR", "TLAT-CAR"]
+                for i in range(len(self.w.wcs.crval)):
+                    if self.w.wcs.crval[i] != 0:
+                        self.w.wcs.crval[i] = 0
 
     def world2pix(self, coord):
         
         '''
         Return pixel coordinates from sky/telescope coordinates
-        '''
-            
+        ''' 
+    
         return self.w.all_world2pix(coord, 1)
 
     def pix2world(self, pixels):
@@ -42,7 +46,7 @@ class wcs_world():
 
         return self.w.all_pix2world(pixels, 1)
 
-    def wcs_proj(self, coord1, coord2, det_num, parang=0):
+    def wcs_proj(self, coord1, coord2, det_num):
 
         '''
         Wrapper for world2pix to include the possibility of using 
@@ -56,17 +60,17 @@ class wcs_world():
             else:
                 coord = np.transpose(np.array([coord1, coord2]))
 
-            self.pixel = self.world2pix(coord, parang)
+            self.pixel = self.world2pix(coord)
 
         else:
             if np.size(np.shape(coord1)) == 1:
                 coord = np.transpose(np.array([coord1, coord2]))
-                self.pixel = self.world2pix(coord, parang[0,:])
+                self.pixel = self.world2pix(coord)
             else:
                 self.pixel = np.zeros((np.size(np.shape(self.data)), len(coord1[0]), 2))
                 for i in range(np.size(np.shape(self.data))):
                     coord = np.transpose(np.array([coord1[i], coord2[i]]))
-                    self.pixel[i,:,:] = self.world2pix(coord, parang[i,:])
+                    self.pixel[i,:,:] = self.world2pix(coord)
 
 
     def reproject(self, world_original):
@@ -74,13 +78,14 @@ class wcs_world():
         x_min_map = np.floor(np.amin(world_original[:,0]))
         y_min_map = np.floor(np.amin(world_original[:,1]))
 
-        new_proj = self.w.copy()
+        new_proj = self.w.deepcopy()
 
-        crpix_new = self.w.wcs.crpix+np.array([x_min_map, y_min_map])
+        crpix_new = self.w.wcs.crpix-(np.array([x_min_map, y_min_map]))
 
-        crval_new = self.w.all_pix2world(crpix_new[0], crpix_new[1], 1)
+        new_proj.wcs.crpix = crpix_new
+        # crval_new = self.pix2world(np.array([[crpix_new[0], crpix_new[1]]]))[0]
 
-        new_proj.wcs.crval = crval_new
+        # new_proj.wcs.crval = crval_new
 
         return new_proj
 
