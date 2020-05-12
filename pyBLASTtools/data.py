@@ -16,7 +16,7 @@ class InputError(Error):
 
 class data:
 
-    def __init__(self, path, idx_start, idx_end, field_list, mode='frames'):
+    def __init__(self, path, idx_start, idx_end, field_list, mode='frames', ref_field=None):
 
         '''
         Class to handle dirfile: load, select a subsample or save data
@@ -29,14 +29,13 @@ class data:
                       fields in the dirfile are read
         - mode: can be frames or samples. If frames, idx_start(_end) are read as 
                 as first and last frame of interest. If samples, the parameters idx_start(_end)
-                refers to the first field on the list (or to the ctime_field of for the full
-                list). This is done to avoid any possible conflict in dirfiles with fields 
-                with different samples per frame
+                refers to the a field given by the parameter ref_field. 
+        - ref_field: reference field for the mode 'samples' to assign the idx_start(_end). 
+                     If None, the reference field is considered the ctime
         '''
 
         self.d = gd.dirfile(path)
 
-    
         if mode == 'frames':
             if idx_end == -1:
                 idx_end = self.d.nframes
@@ -44,13 +43,16 @@ class data:
             first_frame = int(idx_start)
             num_frames = int(idx_end)-int(idx_start)
         else:
+            if ref_field is None:
+                self.ref_field = 'ctime_master_built'
+            else:
+                self.ref_field = ref_field
+
             if idx_end == -1:
-                if field_list == 'full':
-                    ref_field = 'ctime_built_master'
-                    idx_end = self.d.array_len('ctime_built_master')
+                if field_list == 'full':                  
+                    idx_end = self.d.array_len('ctime_master_built')
                 else:
-                    ref_field = field_list[0]
-                    idx_end = self.d.array_len(field_list[0])
+                    idx_end = self.d.array_len(self.ref_field)
         
         self.resample_completed = False
         self.data_values = {}
@@ -64,25 +66,29 @@ class data:
             if mode == 'frames':
                 self.data_values[i] = self.d.getdata(i, first_frame=first_frame, num_frames=num_frames)
             else:
-
-                first_sample = int(idx_start*self.d.spf(i)/self.d.spf(ref_field))
-                num_samples = int((idx_end-idx_start)*self.d.spf(i)/self.d.spf(ref_field))
+                first_sample = int(idx_start*self.d.spf(i)/self.d.spf(self.ref_field))
+                num_samples = int((idx_end-idx_start)*self.d.spf(i)/self.d.spf(self.ref_field))
 
                 self.data_values[i] = self.d.getdata(i, first_sample=first_sample, num_samples=num_samples)
 
             len_fields = np.append(len_fields, len(self.data_values[i]))
+
+        if self.ref_field in field_list:
+            self.ref_field_array = self.data_values[self.ref_field]
+        else:
+            self.ref_field_array = self.d.getdata(self.ref_field, first_sample=int(idx_start), \
+                                                  num_samples=int(idx_end-idx_start))
 
         if np.all(np.diff(len_fields) == 0):
             self.resample_required = False
         else:
             self.resample_required = True
 
-    def resample(self, ref_field, field=None, interpolation_kind='linear'):
+    def resample(self, field=None, interpolation_kind='linear'):
 
         '''
         Resample data based on a reference field. 
         Parameters:
-        - ref_field: reference field for the resampling operation
         - field: field that needs to be resampled. It can be a string with the field name 
                  or a list with multiple fields. Default is None, which means that all 
                  the fields are resampled
@@ -92,29 +98,35 @@ class data:
         if field is None:
             for i in self.data_values.keys():
                 
-                if self.d.spf(i) == self.d.spf(ref_field):
+                if self.d.spf(i) == self.d.spf(self.ref_field):
                     pass
                 else:
-                    self.data_values[i] = utils.change_sampling_rate(ref_field, i, \
-                                                                     self.d.spf(ref_field), self.d.spf(i), \
+                    self.data_values[i] = utils.change_sampling_rate(self.ref_field_array,\
+                                                                     self.data_values[i], \
+                                                                     self.d.spf(self.ref_field), \
+                                                                     self.d.spf(i), \
                                                                      interpolation_kind='linear')
             self.resample_completed = True
         else:
             if isinstance(field, str):
-                self.data_values[field] = utils.change_sampling_rate(ref_field, field, \
-                                                                     self.d.spf(ref_field), self.d.spf(field), \
+                self.data_values[field] = utils.change_sampling_rate(self.ref_field_array, \
+                                                                     self.data_values[field], \
+                                                                     self.d.spf(self.ref_field), \
+                                                                     self.d.spf(field), \
                                                                      interpolation_kind='linear')
 
             else:
                 for i in field:
-                    if self.d.spf(i) == self.d.spf(ref_field):
+                    if self.d.spf(i) == self.d.spf(self.ref_field):
                         pass
                     else:
-                        self.data_values[i] = utils.change_sampling_rate(ref_field, i, \
-                                                                         self.d.spf(ref_field), self.d.spf(i), \
+                        self.data_values[i] = utils.change_sampling_rate(self.ref_field_array, \
+                                                                         self.data_values[i], \
+                                                                         self.d.spf(self.ref_field), \
+                                                                         self.d.spf(i), \
                                                                          interpolation_kind='linear')
 
-    def convert_to_array(self, ref_field = None, interpolation_kind='linear'):
+    def convert_to_array(self, interpolation_kind='linear'):
 
         '''
         Convert the dictionary data values to a numpy array. Numpy arrays needs to have 
@@ -123,17 +135,15 @@ class data:
         Numpy array is built with the values from a single field on the same row. 
         '''
 
-        
-
         try:
             if self.resample_completed is True or self.resample_required is False:
                 keys = self.data_values.keys()
                 array_val = np.zeros((len(keys), len(self.data_values[keys[0]])))
                 count = 0
             else:
-                if ref_field is not None:
+                if self.ref_field is not None:
                     keys = self.data_values.keys()
-                    array_val = np.zeros((len(keys), len(self.data_values[ref_field])))
+                    array_val = np.zeros((len(keys), len(self.ref_field_array)))
                     count = 0
                 else:
                     raise InputError
@@ -143,10 +153,10 @@ class data:
             sys.exit(1)
 
         for i in self.data_values.keys():
-            if self.d.spf(i) == self.d.spf(ref_field):
+            if self.d.spf(i) == self.d.spf(self.ref_field):
                 array_val[count,:] = self.data_values[i]
             else:
-                self.resample(ref_field=ref_field, field=i) 
+                self.resample(field=i) 
                 array_val[count,:] = self.self.data_values[i]
 
             count += 1

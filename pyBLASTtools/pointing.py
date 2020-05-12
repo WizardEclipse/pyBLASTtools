@@ -105,6 +105,8 @@ class utils(object):
 
         self.altaz_frame = AltAz(obstime = self.time, location = self.location)
 
+        self.coordinates = []
+
         if self.system == 'celestial':
             self.coordinates = SkyCoord(self.coord1, self.coord2, frame=self.radec_frame)
         elif self.system == 'horizontal':
@@ -183,7 +185,7 @@ class convert_to_telescope():
 
         self.crval = kwargs.get('crval', np.array([np.median(self.coord1), np.median(self.coord2)]))
 
-    def conversion(self):
+    def conversion(self, det_num=1):
 
         '''
         This function rotates the coordinates projected on the plane using the parallactic angle
@@ -200,6 +202,10 @@ class convert_to_telescope():
 
         x_tel = x_proj*np.cos(self.pa)-y_proj*np.sin(self.pa)
         y_tel = y_proj*np.cos(self.pa)+x_proj*np.sin(self.pa)
+
+        if np.size(np.shape(self.coord1)) == 1:
+            x_tel = np.tile(x_tel, (det_num, 1))
+            y_tel = np.tile(y_tel, (det_num, 1))
 
         return np.degrees(x_tel), np.degrees(y_tel)
 

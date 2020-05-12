@@ -509,25 +509,21 @@ class kidsutils():
     
     def getTs(self, data_dir, roach_num, single, chan, start_samp, stop_samp):
         fdir = gd.dirfile(data_dir)
+
         if single:
-            self.I = fdir.getdata("i_kid"+"%04d" % (chan,)+"_roach"+str(roach_num), \
-                                  first_sample = start_samp,num_samples=int(stop_samp-start_samp))
-            self.Q = fdir.getdata("q_kid"+"%04d" % (chan,)+"_roach"+str(roach_num), \
-                                  first_sample = start_samp,num_samples=int(stop_samp-start_samp))
+            self.I = np.zeros((1, int(stop_samp-start_samp)))
+            self.Q = np.zeros((1, int(stop_samp-start_samp)))
+            chan_number = np.array([chan])
         else:
-            self.I = np.array([])
-            self.Q = np.array([])
-            for i in range(chan):
-                I_temp = fdir.getdata("i_kid"+"%04d" % (i,)+"_roach"+str(roach_num),\
-                                      first_sample = start_samp,num_samples=int(stop_samp-start_samp))
-                Q_temp = fdir.getdata("q_kid"+"%04d" % (i,)+"_roach"+str(roach_num),\
-                                      first_sample = start_samp,num_samples=int(stop_samp-start_samp))
-                if i == 0:
-                    self.I = I_temp
-                    self.Q = Q_temp
-                else:
-                    self.I = np.vstack((self.I, I_temp))
-                    self.Q = np.vstack((self.Q, Q_temp))
+            self.I = np.zeros((chan, int(stop_samp-start_samp)))
+            self.Q = np.zeros((chan, int(stop_samp-start_samp)))
+            chan_number = np.arange(chan)
+
+        for i in range(len(chan_number)):
+            self.I[i] = fdir.getdata("i_kid"+"%04d" % (chan_number[i],)+"_roach"+str(roach_num), \
+                                     first_sample = start_samp,num_samples=int(stop_samp-start_samp))
+            self.Q[i] = fdir.getdata("q_kid"+"%04d" % (chan_number[i],)+"_roach"+str(roach_num), \
+                                     first_sample = start_samp,num_samples=int(stop_samp-start_samp))
 
     def rotatePhase(self):
 

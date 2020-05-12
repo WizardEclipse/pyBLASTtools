@@ -1,6 +1,15 @@
 import numpy as np
+import sys
 from astropy import wcs
 from astropy.convolution import Gaussian2DKernel, convolve
+
+class Error(Exception):
+    """Base class for exceptions in this module."""
+    pass
+
+class MapError(Error):
+    """Exception raised for errors in the input. """
+    pass
 
 class wcs_world():
 
@@ -53,39 +62,25 @@ class wcs_world():
         multiple detectors 
         '''
 
-        if det_num == 1:
-
-            if np.size(np.shape(coord1)) != 1:
-                coord = np.transpose(np.array([coord1[0], coord2[0]]))
-            else:
-                coord = np.transpose(np.array([coord1, coord2]))
-
-            self.pixel = self.world2pix(coord)
-
+        if np.size(np.shape(coord1)) != 1:
+            self.pixel = np.zeros((det_num, len(coord1[0]), 2))
         else:
-            if np.size(np.shape(coord1)) == 1:
-                coord = np.transpose(np.array([coord1, coord2]))
-                self.pixel = self.world2pix(coord)
-            else:
-                self.pixel = np.zeros((np.size(np.shape(self.data)), len(coord1[0]), 2))
-                for i in range(np.size(np.shape(self.data))):
-                    coord = np.transpose(np.array([coord1[i], coord2[i]]))
-                    self.pixel[i,:,:] = self.world2pix(coord)
+            self.pixel = np.zeros((det_num, len(coord1), 2))
 
+        for i in range(det_num):
+            coord = np.transpose(np.array([coord1[i], coord2[i]]))
+            self.pixel[i,:,:] = np.floor(self.world2pix(coord)).astype(int)
 
     def reproject(self, world_original):
 
-        x_min_map = np.floor(np.amin(world_original[:,0]))
-        y_min_map = np.floor(np.amin(world_original[:,1]))
+        x_min_map = np.floor(np.amin(world_original[:,:,0]))
+        y_min_map = np.floor(np.amin(world_original[:,:,1]))
 
         new_proj = self.w.deepcopy()
 
         crpix_new = self.w.wcs.crpix-(np.array([x_min_map, y_min_map]))
 
         new_proj.wcs.crpix = crpix_new
-        # crval_new = self.pix2world(np.array([[crpix_new[0], crpix_new[1]]]))[0]
-
-        # new_proj.wcs.crval = crval_new
 
         return new_proj
 
@@ -100,15 +95,98 @@ class mapmaking(object):
                  convolution=False, std=0., cdelt=0.):
 
         self.data = data               #detector TOD
-        self.weight = weight           #weights associated with the detector values
+        self.sigma = 1/weight**2           #weights associated with the detector values
         self.polangle = polangle       #polarization angles of each detector
         self.number = number           #Number of detectors to be mapped
-        self.pixelmap = np.floor(pixelmap).astype(int)       #Coordinates of each point in the TOD in pixel coordinates
+        self.pixelmap = pixelmap      #Coordinates of each point in the TOD in pixel coordinates
         self.crpix = crpix             #Coordinates of central point 
         self.Ionly = Ionly             #Choose if a map only in Intensity
         self.convolution = convolution       #If true a map is convolved with a gaussian
         self.std = std                 #Standard deviation of the gaussian for the convolution
         self.cdelt = cdelt             #Pixel size of the map. This is used to compute the std in pixels
+
+
+    def pointing_matrix_binning(self, param):
+
+        shape_x = np.ptp(self.pixelmap[:,:,0])
+        shape_y = np.ptp(self.pixelmap[:,:,1])
+        
+        x_min = np.amin(self.pixelmap[:,:,0])
+        y_min = np.amin(self.pixelmap[:,:,1])
+
+        points = self.pixelmap.deepcopy()
+        points[:,:,0] -= x_min
+        points[:,:,1] -= y_min
+
+        temp = np.zeros(shape_x*shape_y)
+
+        for i in range(np.shape(points)[0]):
+            idx = np.ravel_multi_index(points[i], (shape_x, shape_y))
+            temp += np.bincount(idx, weights=param[i], minlength=shape_x*shape_y)
+
+        return np.reshape(temp, (shape_x, shape_y)) 
+
+    def binning_map(self):
+
+        maps = []
+
+        I_est = self.pointing_matrix_binning(param=self.data)*self.sigma
+        hits = 0.5*self.pointing_matrix_binning(param=np.ones_like(self.data))
+
+        if self.Ionly:            
+            Imap = I_est[hits>0]/hits[hits>0]
+
+            maps.append(Imap)
+
+        else:
+            try:
+                cos = np.cos(2.*self.polangle)
+                sin = np.sin(2.*self.polangle)
+
+                Q_est = self.pointing_matrix_binning(param=self.data*cos)*self.sigma
+                U_est = self.pointing_matrix_binning(param=self.data*sin)*self.sigma
+
+                c = self.pointing_matrix_binning(param=0.5*cos)*self.sigma
+                s = self.pointing_matrix_binning(param=0.5*sin)*self.sigma
+                
+                c2 = self.pointing_matrix_binning(param=0.5*cos**2)*self.sigma
+                
+                m = self.pointing_matrix_binning(param=0.5*cos*sin)*self.sigma
+
+                Delta = (c**2*(c2-hits)+2*s*c*m-c2*s**2-\
+                         hits*(c2**2+m**2-c2*hits))
+
+                if np.any(Delta[hits>0]==0):
+                    raise MapError
+                else:
+                    A = -(c2**2+m**2-c2*hits)
+                    B = c*(c2-hits)+s*m
+                    C = c*m-s*c2
+                    D = -((c2-hits)*hits+s**2)
+                    E = c*s-m*hits
+                    F = c2*hits-c**2
+
+                    Imap = np.zeros_like(I_est)
+                    Qmap = np.zeros_like(I_est)
+                    Umap = np.zeros_like(I_est)
+
+                    Imap[hits>0] = (A[hits>0]*I_est[hits>0]+B[hits>0]*Q_est[hits>0]+\
+                                    C[hits>0]*U_est[hits>0])/Delta[hits>0]
+                    Qmap[hits>0] = (B[hits>0]*I_est[hits>0]+D[hits>0]*Q_est[hits>0]+\
+                                    E[hits>0]*U_est[hits>0])/Delta[hits>0]
+                    Umap[hits>0] = (C[hits>0]*I_est[hits>0]+E[hits>0]*Q_est[hits>0]+\
+                                    F[hits>0]*U_est[hits>0])/Delta[hits>0]
+
+                    maps.append(Imap)
+                    maps.append(Qmap)
+                    maps.append(Umap)
+
+            except MapError:
+                print('The matrix is singular in at least a pixel. Check the input data')
+                sys.exit(1)
+
+            return maps
+
 
     def map2d(self):
 
