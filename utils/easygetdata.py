@@ -6,6 +6,7 @@ import scipy as sp
 import pygetdata as gd
 import timeit
 
+from collections.abc import Mapping
 from typing import Union, List
 from scipy import interpolate
 
@@ -59,7 +60,9 @@ class EasyGetData:
                     If None, all fields retain their native spf.
 
         Returns:
-        A dictionary of data blocks by field name.
+        For base_spf=None, a dictionary of data blocks by field name is returned
+        
+        Otherwise, a DataBlock is returned, which wraps a structured record numpy array.
         """
         # Sanitize arange
         start_frame, end_frame = arange
@@ -78,8 +81,7 @@ class EasyGetData:
         if base_spf is not None and base_spf == -1:
             base_spf = max([self._df.spf(name) for name in fields])
 
-        block = DataBlock()
-        retdata = {}
+        data = {}
         for name in fields:
             raw = self._df.getdata(
                     name,
@@ -93,10 +95,12 @@ class EasyGetData:
                 processed = raw
             else:
                 processed = self.resample(raw, base_spf * num_frames)
-            retdata[name] = processed
+            data[name] = processed
 
-        return retdata
-    
+        if base_spf is None:
+            return data
+        return DataBlock(data, base_spf, num_frames)
+
     def resample(self, data, length: int, boxcar=True):
         """
         Resamples a 1D data vector to a new integer length.
@@ -193,12 +197,69 @@ class EasyGetData:
         """
         return not self.is_scalar(name)
 
-class DataBlock(dict):
-    def __init__(self, ):
-        self._raw_data = {}
+class DataBlock(Mapping):
+    """
+    Subclass of a typical mapping, or dictionary that wraps a structured record numpy array.
 
-    def add_field(data, name: str):
-        self._raw_data[name] = data
+    Supports dict-like lookup by field name and array-like lookup by index.
+
+    For index lookup, data is returned per frame (i.e. 1 frame == 1 index), so for data with N
+    samples per frame (spf), N samples are returned per field per frame.
+    """
+    def __init__(self, data: Mapping, spf, nframes):
+        """
+        DataBlock initializer. 
+
+        Takes a dict-like data object and converts it to a structure record numpy array, where the
+        format is based on field name (i.e. the columns are data fields).
+
+        Arguments:
+        - data:     A dict-like Mapping containing the data stored as {name: data}
+                    It must be the case that len(data) == spf * nframes for all entries.
+        - spf:      The number of samples-per-frame implied by the data object.
+        - nframes:  The number of frames/indices implied by the data object
+        """
+        dtype = [(name, "f8") for name in data]
+
+        self._spf = spf
+        self._nframes = nframes
+        self._struct = np.zeros(spf * nframes, dtype=dtype)
+        for name, value in data.items():
+            self._struct[name] = value
+
+    def __getitem__(self, key):
+        """
+        Overload of the lookup by dict key.
+
+        Arguments:
+        - key:      The string field name, index integer, or slice to lookup data.
+
+        Returns:
+        For string field name, returns the data array.
+
+        For index integer, returns a structured array of all the fields at a given frame/index.
+        For spf > 1, spf samples per field are provided.
+
+        For slice, returns a structure array of all the fields over the given frame/index range.
+        For spf > 1, spf samples per field per index are provided.
+        """
+        if isinstance(key, int):
+            key = slice(key, key+1)
+        if isinstance(key, slice):
+            newslice = slice(key.start * self._spf, key.stop * self._spf)
+            return self._struct[newslice]
+        return self._struct[key]
+
+    def __iter__(self):
+        """
+        Iterates through tuples of field data per sample per frame in sequence.
+        """
+        return iter(self._struct)
+    def __len__(self):
+        """
+        Returns the number of frames times the samples per frame (i.e. total number of samples).
+        """
+        return len(self._struct)
 
 def USAGE():
     print("EasyGetData v0.1\n\n"
@@ -261,10 +322,7 @@ def main():
     df_out = EasyGetData(outfile, "w")
     a = df_in.read_data(arange=(start_frame, end_frame), fields=fields, base_spf=base_spf)
 
-    for name, value in a.items():
-        print(name)
-        print(len(value))
-        print(value)
+    print(a[-10:-1]['gyro_x_emc'])
 
 if __name__ == "__main__":
     print(timeit.timeit(main, number=10) / 10)
