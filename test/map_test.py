@@ -35,7 +35,7 @@ pointing_data_resample['AZ_RAW_DGPS'] -= 360.
 az_nodrift = pbt.utils.remove_drift(pointing_data_resample['AZ'], \
                                     pointing_data_resample['AZ_RAW_DGPS'], 100, 100)
 
-conversion = pbt.pointing.utils(az=az_nodrift, el=pointing_data_resample['MC_EL_MOTOR_POS'], \
+conversion = pbt.pointing.utils(az=az_nodrift, alt=pointing_data_resample['MC_EL_MOTOR_POS'], \
                                 radec_frame='current',\
                                 lon=pointing_data_resample['LON'], \
                                 lat=pointing_data_resample['LAT'], \
@@ -45,7 +45,33 @@ conversion = pbt.pointing.utils(az=az_nodrift, el=pointing_data_resample['MC_EL_
 radec = conversion.horizontal2sky()
 pa = conversion.parallactic_angle()
 
-t = pbt.pointing.convert_to_telescope(radec[0], radec[1], pa=pa)
+ra = d.interpolate(master_array=radec[0], fs_master=100)
+dec = d.interpolate(master_array=radec[1], fs_master=100)
+pa = d.interpolate(master_array=pa, fs_master=100)
+
+t = pbt.pointing.convert_to_telescope(ra, dec, pa=pa)
 radec = t.conversion()
 
-pa = d.interpolate(master_array=pa, fs_master=100)
+det = pbt.detector.kidsutils(data_dir=roach_file[0], roach_num=1, single=True, chan=10, \
+                             first_sample=d.idx_start_roach, last_sample=d.idx_end_roach)
+
+phase = det.phase
+
+phase_trend = pbt.detector.detector_trend(phase)
+phase_detrend, baseline = phase_trend.fit_residual(baseline=True, return_baseline=True, \
+                                                   baseline_type='poly', order=8, tol=5e-4)
+
+ctype = 'RA and DEC'
+crpix = np.array([50.,50.])
+crval = np.array([np.median(radec[0]), np.median(radec[1])])
+pixel_size = np.array([25./3600., 25./3600.])
+
+wcs = pbt.mapmaker.wcs_world(crpix=crpix, cdelt=pixel_size, crval=crval, telcoord=True)
+wcs.wcs_proj(radec[0], radec[1], 1)
+
+proj = wcs.w.copy()
+w = wcs.pixel.copy()
+
+maps=pbt.mapmaker.mapmaking(phase_detrend, 1., np.zeros(len(phase_detrend)), w, crpix)
+
+maps = maps.binning_map()
