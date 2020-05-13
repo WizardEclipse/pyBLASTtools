@@ -10,6 +10,22 @@ from collections.abc import Mapping
 from typing import Union, List
 from scipy import interpolate
 
+GDTYPE_LOOKUP = {
+        np.dtype("int8"):        gd.INT8,
+        np.dtype("int16"):       gd.INT16,
+        np.dtype("int32"):       gd.INT32,
+        np.dtype("int64"):       gd.INT64,
+        np.dtype("uint8"):       gd.UINT8,
+        np.dtype("uint16"):      gd.UINT16,
+        np.dtype("uint32"):      gd.UINT32,
+        np.dtype("uint64"):      gd.UINT64,
+        np.dtype("float"):       gd.FLOAT,
+        np.dtype("float32"):     gd.FLOAT32,
+        np.dtype("float64"):     gd.FLOAT64,
+        np.dtype("complex"):     gd.COMPLEX,
+        np.dtype("complex64"):   gd.COMPLEX64,
+        np.dtype("complex128"):  gd.COMPLEX128}
+
 class EasyGetData:
     SCALAR_ENTRIES = [gd.CONST_ENTRY, gd.CARRAY_ENTRY, gd.SARRAY_ENTRY, gd.STRING_ENTRY]
 
@@ -43,7 +59,7 @@ class EasyGetData:
         df = gd.dirfile(filename, flags=flags)
 
         self._df = df
-        self._nframes = df.nframes
+        self.nframes = df.nframes
         self._field_names = [name.decode() for name in df.field_list() if self.is_vector(name)]
 
 
@@ -67,9 +83,9 @@ class EasyGetData:
         # Sanitize arange
         start_frame, end_frame = arange
         if end_frame < 0:
-            end_frame = max(0, end_frame + self._nframes + 1)
+            end_frame = max(0, end_frame + self.nframes + 1)
         if start_frame < 0:
-            start_frame = max(0, start_frame + self._nframes + 1)
+            start_frame = max(0, start_frame + self.nframes + 1)
         num_frames = end_frame - start_frame
 
         # Sanitize fields
@@ -83,23 +99,53 @@ class EasyGetData:
 
         data = {}
         for name in fields:
+            # getdata from the dirfile
             raw = self._df.getdata(
                     name,
                     first_frame=start_frame,
                     num_frames=num_frames,
                     first_sample=0,
-                    num_samples=0,
-                    return_type=gd.FLOAT64)
+                    num_samples=0)
 
+            # Upsample data (if necessary) and add to the collection.
             if base_spf is None:
                 processed = raw
             else:
                 processed = self.resample(raw, base_spf * num_frames)
             data[name] = processed
 
-        if base_spf is None:
-            return data
+        # Return the data in the form of a DataBlock
         return DataBlock(data, base_spf, num_frames)
+
+    def write_data(self, data: Mapping, arange: List[int] = (0, -1)):
+        # Sanitize arange
+        start_frame, end_frame = arange
+        if end_frame < 0:
+            end_frame = max(0, end_frame + data.nframes + 1)
+        if start_frame < 0:
+            start_frame = max(0, start_frame + data.nframes + 1)
+        num_frames = end_frame - start_frame
+
+        for name, value in data.items():
+            if data.spf is None:
+                spf = int(len(value) / data.nframes)
+            else:
+                spf = data.spf
+            t = GDTYPE_LOOKUP[value.dtype]
+            # Create the entry if not already present in the dirfile
+            if name not in self._df.field_list():
+                entry = gd.entry(gd.RAW_ENTRY, name, 0, (t ,spf)) 
+                self._df.add(entry)
+
+            # putdata into the dirfile
+            print("%20s => %d frames (%d spf) starting at frame %d" % 
+                    (name, num_frames, spf, start_frame))
+            v = np.array(value[(start_frame*spf):(end_frame*spf)])
+            self._df.putdata(name, v, t, first_frame=start_frame, first_sample=start_frame)
+
+        self._df.flush()
+
+        return num_frames
 
     def resample(self, data, length: int, boxcar=True):
         """
@@ -217,15 +263,20 @@ class DataBlock(Mapping):
         - data:     A dict-like Mapping containing the data stored as {name: data}
                     It must be the case that len(data) == spf * nframes for all entries.
         - spf:      The number of samples-per-frame implied by the data object.
+                    If None, different spf per field is assumed, so data is inaccessible by index.
         - nframes:  The number of frames/indices implied by the data object
         """
-        dtype = [(name, "f8") for name in data]
 
-        self._spf = spf
-        self._nframes = nframes
-        self._struct = np.zeros(spf * nframes, dtype=dtype)
-        for name, value in data.items():
-            self._struct[name] = value
+        self.spf = spf
+        self.nframes = nframes
+
+        if spf is not None:
+            dtype = [(name, value.dtype) for name, value in data.items()]
+            self._struct = np.zeros(spf * nframes, dtype=dtype)
+            for name, value in data.items():
+                self._struct[name] = value
+        else:
+            self._struct = data
 
     def __getitem__(self, key):
         """
@@ -246,20 +297,26 @@ class DataBlock(Mapping):
         if isinstance(key, int):
             key = slice(key, key+1)
         if isinstance(key, slice):
-            newslice = slice(key.start * self._spf, key.stop * self._spf)
+            if self.spf is None:
+                raise Exception("Data inaccessible by index for spf=None")
+            newslice = slice(key.start * self.spf, key.stop * self.spf)
             return self._struct[newslice]
         return self._struct[key]
 
     def __iter__(self):
         """
-        Iterates through tuples of field data per sample per frame in sequence.
+        Iterate by column of field data.
         """
-        return iter(self._struct)
+        if self.spf is None:
+            return iter(self._struct)
+        return iter(self._struct.dtype.names)
     def __len__(self):
         """
-        Returns the number of frames times the samples per frame (i.e. total number of samples).
+        Returns the number field data columns.
         """
-        return len(self._struct)
+        if self.spf is None:
+            return len(self._struct)
+        return len(self._struct.dtype.names)
 
 def USAGE():
     print("EasyGetData v0.1\n\n"
@@ -281,7 +338,7 @@ def USAGE():
             "                               All other values are interpreted as numeric\n"
             "                               Default spf is native\n"
             )
-    exit(0)
+    sys.exit(0)
 
 def main():
 
@@ -319,13 +376,14 @@ def main():
         USAGE()
 
     df_in  = EasyGetData(infile, "r")
-    df_out = EasyGetData(outfile, "w")
-    a = df_in.read_data(arange=(start_frame, end_frame), fields=fields, base_spf=base_spf)
+    arange=(start_frame, end_frame)
+    data = df_in.read_data(arange=arange, fields=fields, base_spf=base_spf)
 
-    print(a[-10:-1]['gyro_x_emc'])
+    df_out = EasyGetData(outfile, "w")
+    df_out.write_data(data=data, arange=arange)
 
 if __name__ == "__main__":
-    print(timeit.timeit(main, number=10) / 10)
+    main()
 
         
 
