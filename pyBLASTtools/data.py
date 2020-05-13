@@ -97,22 +97,21 @@ class data:
 
         if field is None:
             for i in self.data_values.keys():
-                
                 if self.d.spf(i) == self.d.spf(self.ref_field):
                     pass
                 else:
-                    self.data_values[i] = utils.change_sampling_rate(self.ref_field_array,\
-                                                                     self.data_values[i], \
+                    self.data_values[i] = utils.change_sampling_rate(self.data_values[i], \
+                                                                     self.ref_field_array,\
+                                                                     self.d.spf(i),\
                                                                      self.d.spf(self.ref_field), \
-                                                                     self.d.spf(i), \
                                                                      interpolation_kind='linear')
             self.resample_completed = True
         else:
             if isinstance(field, str):
-                self.data_values[field] = utils.change_sampling_rate(self.ref_field_array, \
-                                                                     self.data_values[field], \
-                                                                     self.d.spf(self.ref_field), \
+                self.data_values[field] = utils.change_sampling_rate(self.data_values[field], \
+                                                                     self.ref_field_array, \
                                                                      self.d.spf(field), \
+                                                                     self.d.spf(self.ref_field), \
                                                                      interpolation_kind='linear')
 
             else:
@@ -120,11 +119,17 @@ class data:
                     if self.d.spf(i) == self.d.spf(self.ref_field):
                         pass
                     else:
-                        self.data_values[i] = utils.change_sampling_rate(self.ref_field_array, \
-                                                                         self.data_values[i], \
+
+
+
+                        self.data_values[i] = utils.change_sampling_rate(self.data_values[field], \
+                                                                         self.ref_field_array, \
+                                                                         self.d.spf(field), \
                                                                          self.d.spf(self.ref_field), \
-                                                                         self.d.spf(i), \
                                                                          interpolation_kind='linear')
+
+
+
 
     def convert_to_array(self, interpolation_kind='linear'):
 

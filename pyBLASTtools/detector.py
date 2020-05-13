@@ -13,7 +13,7 @@ class InputError(Error):
     """Exception raised for errors in the input. """
     pass
         
-class despike():
+class despike:
 
     '''
     Class to despike the TOD
@@ -27,7 +27,7 @@ class despike():
 
         - data: signal that needs to be analyzed
         - remove_mean: a parameter to choose if the mean is removed from the signal that needs 
-                       to be analyzed
+                       to be analyzed just for the purpose of searching peaks
         - mean_std_distance: a parameter used to compute the useful data for estimating the mean 
                              and std of the signal. 
                              This parameter is given by (data-mean(data))/np.mean(data)
@@ -43,21 +43,25 @@ class despike():
         '''
 
         self.data = data
+
         self.remove_mean = remove_mean
-        self.mean_std_distance = mean_std_distance
 
-        if self.mean_std_distance < 1e-5 or self.mean_std_distance > 1:
-            self.mean_std_distance = 0.3
+        if mean_std_distance < 1e-5 or mean_std_distance > 1:
+            mean_std_distance = 0.3
 
-        val = (self.data-np.mean(self.data))/np.mean(self.data)
+        val = (data-np.mean(data, axis=1))/np.mean(data, axis=1)
+        
+        self.signal_mean = np.zeros(np.shape(data)[0])
+        self.signal_std = np.zeros(np.shape(data)[0])
 
-        self.signal_std = np.std(self.data[val<mean_std_distance])
-        self.signal_mean = np.mean(self.data[val<mean_std_distance])
+        for i in range(np.shape(self.data)[0]):
+            self.signal_std[i] = np.std(self.data[i,val[i]<mean_std_distance], axis=1)
+            self.signal_mean[i] = np.mean(self.data[i,val[i]<mean_std_distance], axis=1)
         
         if remove_mean:
-            self.signal = self.data-self.signal_mean
+            self.signal = data-self.signal_mean
         else:
-            self.signal = self.data.copy()
+            self.signal = data
 
         if hthres is not None:
             self.hthres = hthres*self.signal_std
@@ -79,23 +83,34 @@ class despike():
         else:
             self.width = np.array([1,200])
 
-        self.idx_peak, self.param_peak = sgn.find_peaks(np.abs(self.signal), height=self.hthres, \
-                                                        prominence=self.pthres, \
-                                                        threshold=self.thres, width=self.width, \
-                                                        rel_height=rel_height)
+        self.idx_peak = []
+        self.param_peak = []
+
+        for i in range(np.shape(self.signal)[0]):
+
+            peak_temp, param_temp = sgn.find_peaks(np.abs(self.signal[i]), height=self.hthres, \
+                                                   prominence=self.pthres, \
+                                                   threshold=self.thres, width=self.width, \
+                                                   rel_height=rel_height)
+            
+            self.idx_peak.append(peak_temp)
+            self.param_peak.append(param_temp)
 
         if full_width:
-            param_temp = sgn.peak_widths(np.abs(self.signal), peaks=self.idx_peak, rel_height=1.)
 
-            ledge = np.append(param_temp[-2][0], np.maximum(param_temp[-2][1:], param_temp[-1][:-1]))
-            redge = np.append(np.minimum(param_temp[-2][1:], param_temp[-1][:-1]), param_temp[-1][-1])
+            for i in range(np.shape(self.signal)[0]):
+                param_temp = sgn.peak_widths(np.abs(self.signal[i]), peaks=self.idx_peak, rel_height=1.)
 
-            self.param_peak['widths'] = param_temp[0]
-            self.param_peak['left_ips'] = ledge
-            self.param_peak['right_ips'] = redge
+                ledge = np.append(param_temp[-2][0], np.maximum(param_temp[-2][1:], param_temp[-1][:-1]))
+                redge = np.append(np.minimum(param_temp[-2][1:], param_temp[-1][:-1]), param_temp[-1][-1])
 
-        self.param_peak['left_ips'] = (np.floor(self.param_peak['left_ips'])).astype(int)
-        self.param_peak['right_ips'] = (np.floor(self.param_peak['right_ips'])).astype(int)
+                self.param_peak[i]['widths'] = param_temp[0]
+                self.param_peak[i]['left_ips'] = ledge
+                self.param_peak[i]['right_ips'] = redge
+
+        for i in range(np.shape(self.signal)[0]):
+            self.param_peak[i]['left_ips'] = (np.floor(self.param_peak[i]['left_ips'])).astype(int)
+            self.param_peak[i]['right_ips'] = (np.floor(self.param_peak[i]['right_ips'])).astype(int)
 
     def replace_peak(self, peaks=None, ledge=None, redge=None, window=1000):
 
@@ -111,64 +126,65 @@ class despike():
 
         x_inter = np.array([], dtype = 'int')
 
-        replaced = self.signal.copy()
+        replaced = self.data.copy()
 
-        if peaks is None:
-            peaks = self.idx_peak
+        for j in range(np.shape(self.data)[0]):
+            if peaks is None:
+                peaks = self.idx_peak[j]
 
-        if ledge is None:
-            ledge = self.param_peak['left_ips']
-        else:
-            if isinstance(ledge, np.ndarray):
-                if len(ledge) != len(peaks):
-                    ledge = peaks-np.amax(ledge)
+            if ledge is None:
+                ledge = self.param_peak[j]['left_ips']
+            else:
+                if isinstance(ledge, np.ndarray):
+                    if len(ledge) != len(peaks):
+                        ledge = peaks-np.amax(ledge)
+                    else:
+                        ledge = ledge
                 else:
-                    ledge = ledge
-            else:
-                ledge = peaks-np.amax(ledge)            
+                    ledge = peaks-np.amax(ledge)            
 
-        if redge is None:
-            redge = self.param_peak['right_ips']
-        else:
-            if isinstance(redge, np.ndarray):
-                if len(redge) != len(peaks):
-                    redge = peaks+np.amax(redge)
+            if redge is None:
+                redge = self.param_peak[j]['right_ips']
+            else:
+                if isinstance(redge, np.ndarray):
+                    if len(redge) != len(peaks):
+                        redge = peaks+np.amax(redge)
+                    else:
+                        redge = redge
                 else:
-                    redge = redge
-            else:
-                redge = peaks+np.amax(redge)  
+                    redge = peaks+np.amax(redge)  
 
-            idx_redge, = np.where(redge>peaks[-1])
+                idx_redge, = np.where(redge>peaks[-1])
 
-            redge[idx_redge] = peaks[-1]
+                redge[idx_redge] = peaks[-1]
 
-        ledge = np.floor(ledge).astype(int)
-        redge = np.ceil(redge).astype(int)
+            ledge = np.floor(ledge).astype(int)
+            redge = np.ceil(redge).astype(int)
 
-        for i in range(0, len(peaks)):
-            
-            idx=np.arange(ledge[i]-1, redge[i]+1) #Added and removed 1 just to consider eventual rounding
-            x_inter = np.append(x_inter, idx)
+            for i in range(0, len(peaks)):
+                
+                idx=np.arange(ledge[i]-1, redge[i]+1) #Added and removed 1 just to consider eventual rounding
+                x_inter = np.append(x_inter, idx)
 
-            array_temp = np.append(replaced[ledge[i]-window-1:ledge[i]-1], \
-                                   replaced[redge[i]+1:redge[i]+window+1])
+                array_temp = np.append(replaced[j][ledge[i]-window-1:ledge[i]-1], \
+                                       replaced[j][redge[i]+1:redge[i]+window+1])
 
-            mean_temp = np.mean(array_temp)
-            std_temp = np.std(array_temp)
-            var_temp = np.var(array_temp)
+                mean_temp = np.mean(array_temp)
+                std_temp = np.std(array_temp)
+                var_temp = np.var(array_temp)
 
-            p_stat = np.abs(np.abs(mean_temp/var_temp)-1.)
+                p_stat = np.abs(np.abs(mean_temp/var_temp)-1.)
 
-            if p_stat <= 1e-2:
-                val = np.random.poisson(mean_temp, len(idx))
-                replaced[ledge[i]-1:redge[i]+1] = val
-            else:
-                val = np.random.normal(mean_temp, std_temp, len(idx))
-                replaced[ledge[i]-1:redge[i]+1] = val
+                if p_stat <= 1e-2:
+                    val = np.random.poisson(mean_temp, len(idx))
+                    replaced[j][ledge[i]-1:redge[i]+1] = val
+                else:
+                    val = np.random.normal(mean_temp, std_temp, len(idx))
+                    replaced[j][ledge[i]-1:redge[i]+1] = val
 
         return replaced
 
-class filterdata():
+class filterdata:
 
     '''
     class for filter the detector TOD
@@ -250,25 +266,25 @@ class filterdata():
 
         if window is True:
             if window_type.lower() == 'hanning':
-                window_data = np.hanning(len(self.data))
+                window_data = np.hanning(len(self.data[0]))
             elif window_type.lower() == 'bartlett':
-                window_data = np.bartlett(len(self.data))
+                window_data = np.bartlett(len(self.data[0]))
             elif window_type.lower() == 'blackman':
-                window_data = np.blackman(len(self.data))
+                window_data = np.blackman(len(self.data[0]))
             elif window_type.lower() == 'hamming':
-                window_data = np.hamming(len(self.data))
+                window_data = np.hamming(len(self.data[0]))
             elif window_type.lower() == 'kaiser':
-                window_data = np.kaiser(len(self.data), beta_kaiser)
+                window_data = np.kaiser(len(self.data[0]), beta_kaiser)
 
             fft_data = np.fft.rfft(self.data*window_data)
         else:
             fft_data = np.fft.rfft(self.data)
 
-        fft_frequency = np.fft.rfftfreq(np.size(self.data), 1/self.fs)
+        fft_frequency = np.fft.rfftfreq(np.size(self.data[0]), 1/self.fs)
 
         vect = np.vectorize(self.cosine_filter, otypes=[np.float])
 
-        ifft_data = np.fft.irfft(vect(fft_frequency, filter_type)*fft_data, len(self.data))
+        ifft_data = np.fft.irfft(vect(fft_frequency, filter_type)*fft_data, len(self.data[0]))
 
         return ifft_data
 
@@ -332,18 +348,19 @@ class detector_trend():
     def __init__(self, data, remove_signal=False):
         
         self.data = data
-        self.x = np.arange(len(self.data))
+        self.x = np.arange(len(self.data[0]))
 
         if isinstance(self.data, np.ma.core.MaskedArray):
             self.mask = self.data.mask
 
         if remove_signal:
-            signal = despike(data, thres=None, hthres=None, width=250, rel_height=0.75)
             self.mask = np.zeros_like(data, dtype=bool)
-            ledge = np.floor(signal.param_peak['left_ips']).astype(int)
-            redge = np.floor(signal.param_peak['right_ips']).astype(int)
-            for j in range(len(ledge)):
-                self.mask[ledge[j]:redge[j]] = True
+            signal = despike(data, thres=None, hthres=None, width=250, rel_height=0.75)
+            for i in range(np.shape(self.mask)[0]):
+                ledge = np.floor(signal.param_peak[i]['left_ips']).astype(int)
+                redge = np.floor(signal.param_peak[i]['right_ips']).astype(int)
+                for j in range(len(ledge)):
+                    self.mask[ledge[j]:redge[j]] = True
             self.mask_array = True
         else:
             self.mask_array = False
@@ -363,12 +380,11 @@ class detector_trend():
 
         if self.mask_array or isinstance(y, np.ma.core.MaskedArray):
             masked_array = np.ma.array(y, mask=self.mask)
-            p = np.ma.polyfit(self.x, masked_array, order)
+            p = np.ma.polyfit(self.x, masked_array.T, order)
         else:
-            p = np.polyfit(self.x, y, order)
-        
-        poly = np.poly1d(p)
-        y_fin = poly(self.x)
+            p = np.polynomial.polynomial.polyfit(self.x, y.T, order)
+
+        y_fin = np.polynomial.polynomial.polyval(self.x, p)
 
         return y_fin, p
 
@@ -414,29 +430,34 @@ class detector_trend():
                 coeffs = coeffs_new
                 y = np.minimum(y, base)
 
-            poly = np.poly1d(coeffs)
+            self.offset = coeffs[-1,:]
 
-            self.offset = coeffs[-1]
-
-            return poly(self.x)
+            return np.polynomial.polynomial.polyval(self.x, coeffs)
 
         elif baseline_type.lower() == 'inter':
 
             points = np.ones(len(y))*np.mean(y)
+            self.offset = np.zeros(np.shape(y)[0])
+            base_inter = np.zeros_like(y)
 
-            for i in range(iter_val):
-                f = interpolate.UnivariateSpline(np.arange(len(y)), y, s=interpolation_smooth)
-                base = f(np.arange(len(y)))
+            for j in range(np.shape(y)[0]):
+                z = y[j]
+                points = np.ones(len(z))*np.mean(z)
+                for i in range(iter_val):
+                    f = interpolate.UnivariateSpline(np.arange(len(z)), z, s=interpolation_smooth)
+                    base = f(np.arange(len(z)))
 
-                if np.all(np.abs(base-points)<tol):
-                    break
+                    if np.all(np.abs(base-points)<tol):
+                        break
 
-                y = np.minimum(y, base)
-                points = base
+                    z = np.minimum(z, base)
+                    points = base
 
-            self.offset = np.mean(base[:1000])
+                base_inter[j] = base
+                self.offset[j] = np.mean(base[:1000])
 
-            return base
+            return base_inter
+
     
     def fit_residual(self, order=6, baseline=False, return_baseline=False, \
                      baseline_type='poly', interpolation_smooth=2.0,\
@@ -465,7 +486,7 @@ class detector_trend():
 
             return self.offset
 
-class kidsutils():
+class kidsutils:
 
     '''
     Class containing useful functions for KIDs
