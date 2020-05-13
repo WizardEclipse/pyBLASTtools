@@ -1,140 +1,211 @@
 import numpy as np
 import gc
 from astropy import wcs
+import astropy.units as u
+from astropy.coordinates import EarthLocation, AltAz, FK5, ICRS, SkyCoord
+from astropy.time import Time, core
 
 import pyBLASTtools.quaternion as quat
 
 class utils(object):
 
     '''
-    class to handle conversion between different coodinates sytem 
+    class to handle conversion between different coodinates sytem and compute 
+    useful astronomical quantities
     '''
 
-    def __init__(self, coord1, coord2, lst = None, lat = None):
-
-        self.coord1 = coord1              #Array of coord 1 (if RA needs to be in hours)
-        self.coord2 = np.radians(coord2)  #Array of coord 2 converted in radians   
-        self.lst = lst                    #Local Sideral Time in hours
-        self.lat = np.radians(lat)        #Latitude converted in radians
-
-    def ra2ha(self):
+    def __init__(self, **kwargs):
 
         '''
-        Return the hour angle in hours given the lst and the ra
-        i.e. both lst and ra needs to be in hours
-        ''' 
-
-        return self.lst-self.coord1
-
-    def ha2ra(self, hour_angle):
-
+        Possible arguments:
+        - lon: Longitude (in degrees otherwise specify lon_unit as an astropy unit)
+        - lat: Latitude (in degrees otherwise specify lat_unit as an astropy unit)
+        - height: Altitude (in meters otherwise specify height_unit as an astropy unit)
+        - time: time of the observation in unix format and in seconds or as an astropy.time.core.Time object
+        - ra: Right ascension (in degrees otherwise specify coord1_unit as an astropy unit)
+        - dec: Declination (in degrees otherwise specify coord2_unit as an astropy unit)
+        - az: Azimuth (in degrees otherwise specify coord1_unit as an astropy unit)
+        - alt: Elevation (in degrees otherwise specify coord2_unit as an astropy unit)
+        - radec_frame: Frame of the Equatorial system, ICRS, current or J2000. Default is current if
+                       a time is defined, otherwise is J2000
         '''
-        Return the right ascension in hours given the lst and hour angles
-        i.e. both lst and hour angle needs to be in hours
-        '''
 
-        return self.lst - hour_angle
+        ra = kwargs.get('ra')
+        dec = kwargs.get('dec')
+        if ra is not None and dec is not None:
+            self.system = 'celestial'
+            coord1 = ra
+            coord2 = dec
 
-    def radec2azel(self):
+        az = kwargs.get('az')
+        alt = kwargs.get('alt')
+        if az is not None and alt is not None:
+            self.system = 'horizontal'
+            coord1 = az
+            coord2 = alt
 
-        '''
-        Function to convert RA and DEC to AZ and EL
-        '''
-        
-        hour_angle = np.radians(self.ra2ha()*15.)
-
-        if isinstance(hour_angle, np.ndarray):
-            index, = np.where(hour_angle<0)
-            hour_angle[index] += 2*np.pi
+        coord1_unit = kwargs.get('coord1_unit', u.degree)
+        if isinstance(coord1, u.quantity.Quantity):
+            self.coord1 = coord1
         else:
-            if hour_angle<0:
-                hour_angle +=2*np.pi
+            self.coord1 = coord1*coord1_unit
 
-        el = np.arcsin(np.sin(self.coord2)*np.sin(self.lat)+\
-                       np.cos(self.lat)*np.cos(self.coord2)*np.cos(hour_angle))
-
-        az = np.arccos((np.sin(self.coord2)-np.sin(self.lat)*np.sin(el))/(np.cos(self.lat)*np.cos(el)))
-
-        if isinstance(az, np.ndarray):
-            index, = np.where(np.sin(hour_angle)>0)
-            az[index] = 2*np.pi - az[index]
+        coord2_unit = kwargs.get('coord2_unit', u.degree)
+        if isinstance(coord2, u.quantity.Quantity):
+            self.coord2 = coord2
         else:
-            if np.sin(hour_angle)>0 :
-                az = 2*np.pi - az
-        return np.degrees(az), np.degrees(el)
+            self.coord2 = coord2*coord2_unit
 
-    def azel2radec(self):
+        lon = kwargs.get('lon')
+        lon_unit = kwargs.get('lon_unit', u.degree)
+        if isinstance(lon, u.quantity.Quantity):
+            self.lon = lon
+        else:
+            self.lon = lon*lon_unit
+
+        lat = kwargs.get('lat')
+        lat_unit = kwargs.get('lat_unit', u.degree)
+        if isinstance(lat, u.quantity.Quantity):
+            self.lat = lat
+        else:
+            self.lat = lat*lat_unit
+
+        height = kwargs.get('height', 0.)
+        height_unit = kwargs.get('height_unit', u.meter)
+        if isinstance(height, u.quantity.Quantity):
+            self.height = height
+        else:
+            self.height = height*height_unit
+
+        time = kwargs.get('time')
+        if isinstance(time, core.Time):
+            self.time = Time
+        else:
+            if time is not None:
+                self.time = Time(time*u.s, format='unix', scale='utc')
+            else:
+                self.time = Time('J2000')
+
+        if time is not None:
+            radec_frame = kwargs.get('radec_frame', 'current')
+        else:
+            radec_frame = 'j2000'
+
+        if radec_frame.lower() == 'icrs':
+            self.radec_frame = ICRS()
+        elif radec_frame.lower() == 'j2000':
+            self.radec_frame = FK5(equinox='j2000')
+        elif radec_frame.lower() == 'current':
+            time_epoch = np.mean(self.time.unix)
+            self.radec_frame = FK5(equinox=Time(time_epoch, format='unix', scale='utc'))
+        else:
+            self.radec_frame = radec_frame
+
+        self.location = EarthLocation(lon=self.lon, lat=self.lat, height=self.height)
+
+        self.altaz_frame = AltAz(obstime = self.time, location = self.location)
+
+        self.coordinates = []
+
+        if self.system == 'celestial':
+            self.coordinates = SkyCoord(self.coord1, self.coord2, frame=self.radec_frame)
+        elif self.system == 'horizontal':
+            self.coordinates = SkyCoord(self.coord1, self.coord2, frame=self.altaz_frame)
+
+    def horizontal2sky(self):
 
         '''
-        Function to convert AZ and EL to RA and DEC
+        Convert horizontal coordinates to sky coordinates using astropy routines
         '''
 
-        dec = np.arcsin(np.sin(self.coord2)*np.sin(self.lat)+\
-                        np.cos(self.lat)*np.cos(self.coord2)*np.cos(np.radians(self.coord1)))
+        self.radec_coord = self.coordinates.transform_to(self.radec_frame)
 
+        return self.radec_coord.ra.deg, self.radec_coord.dec.deg
 
-        hour_angle = np.arccos((np.sin(self.coord2)-np.sin(self.lat)*np.sin(dec))/(np.cos(self.lat)*np.cos(dec)))
+    def sky2horizontal(self):
 
-        index, = np.where(np.sin(np.radians(self.coord1)) > 0)
-        hour_angle[index] = 2*np.pi - hour_angle[index]
+        '''
+        Convert sky coordinates to horizontal coordinates using astropy routines
+        '''
 
-        ra = self.ha2ra(np.degrees(hour_angle)/15.)*15.
+        self.altaz_coord = self.coordinates.transform_to(self.altaz_frame)
 
-        index, = np.where(ra<0)
-        ra[index] += 360.
-
-        return ra, np.degrees(dec)
+        return self.altaz_coord.az.deg, self.altaz_coord.alt.deg
 
     def parallactic_angle(self):
-
+        
         '''
-        Compute the parallactic angle which is returned in degrees  
+        Compute the parallactic angle 
         '''
 
-        hour_angle = np.radians((self.ra2ha())*15)
-
-        if isinstance(hour_angle, np.ndarray):
+        if self.system == 'celestial':
+            coord = self.coordinates
+        elif self.system == 'horizontal':
             try:
-                index, = np.where(hour_angle<0)
-                hour_angle[index] += 2*np.pi
-            except ValueError:
-                index, = np.where(hour_angle[0]<0)
-                hour_angle[0,index] += 2*np.pi
+                coord = self.radec_coord
+            except AttributeError:
+                coord_temp = self.horizontal2sky()
+                coord = SkyCoord(coord_temp[0], coord_temp[1], unit=u.degree, frame=self.radec_frame)
+
+        LST = self.time.sidereal_time('mean', longitude=self.location.lon)
+        H = (LST - coord.ra).radian
+        q = np.arctan2(np.sin(H),
+                       (np.tan(self.location.lat.radian)*np.cos(coord.dec.radian)-\
+                        np.sin(coord.dec.radian)*np.cos(H)))
+
+        return np.degrees(q) 
+
+class convert_to_telescope():
+
+    '''
+    Class to convert from sky equatorial coordinates to telescope coordinates using a tangential projection
+    '''
+
+    def __init__(self, coord1, coord2, **kwargs):
+
+        self.coord1 = coord1           #RA in degrees       
+        self.coord2 = coord2           #DEC in degrees
+        
+        self.pa = kwargs.get('pa')
+
+        if self.pa is None:
+            self.lon = kwargs.get('lon') 
+            self.lat = kwargs.get('lat')
+            self.time = kwargs.get('time')
+            
+            if self.lon is not None and self.lat is not None and self.time is not None:
+
+                parang = utils(ra=self.coord1, dec=self.coord2, lon=self.lon, lat=self.lat, time=self.time)
+                self.pa = np.radians(parang.parallactic_angle())
+            else:
+                self.pa = np.zeros_like(self.coord1)
+
         else:
-            if hour_angle<=0:
-                hour_angle += 2*np.pi
+            self.pa = np.radians(self.pa)
 
-        y_pa = np.cos(self.lat)*np.sin(hour_angle)
-        x_pa = np.sin(self.lat)*np.cos(self.coord2)-np.cos(hour_angle)*np.cos(self.lat)*np.sin(self.coord2)
+        self.crval = kwargs.get('crval', np.array([np.median(self.coord1), np.median(self.coord2)]))
 
-        pa = np.arctan2(y_pa, x_pa)
-
-        return np.degrees(pa)
-
-class convert_to_telescope(object):
-
-    '''
-    Class to convert from sky equatorial coordinates to telescope coordinates
-    '''
-
-    def __init__(self, coord1, coord2, lst, lat):
-
-        self.coord1 = coord1           #RA, needs to be in hours       
-        self.coord2 = coord2           #DEC
-        self.lst = lst 
-        self.lat = lat
-
-    def conversion(self):
+    def conversion(self, det_num=1):
 
         '''
         This function rotates the coordinates projected on the plane using the parallactic angle
         '''
         
-        parang = utils(self.coord1, self.coord2, self.lst, self.lat)
-        pa = parang.parallactic_angle()
+        den = (np.sin(np.radians(self.coord2))*np.sin(np.radians(self.crval[1]))+\
+               np.cos(np.radians(self.coord2))*np.cos(np.radians(self.crval[1]))*\
+               np.cos(np.radians(self.coord1-self.crval[0])))
 
-        x_tel = np.radians(self.coord1*15)*np.cos(pa)-np.radians(self.coord2)*np.sin(pa)
-        y_tel = np.radians(self.coord2)*np.cos(pa)+np.radians(self.coord1*15)*np.sin(pa)
+        x_proj = (np.cos(np.radians(self.coord2))*np.sin(np.radians(self.coord1-self.crval[0])))/den
+        y_proj = (np.sin(np.radians(self.coord2))*np.cos(np.radians(self.crval[1]))-\
+                  np.cos(np.radians(self.coord2))*np.sin(np.radians(self.crval[1]))*\
+                  np.cos(np.radians(self.coord1-self.crval[0])))/den
+
+        x_tel = x_proj*np.cos(self.pa)-y_proj*np.sin(self.pa)
+        y_tel = y_proj*np.cos(self.pa)+x_proj*np.sin(self.pa)
+
+        if np.size(np.shape(self.coord1)) == 1:
+            x_tel = np.tile(x_tel, (det_num, 1))
+            y_tel = np.tile(y_tel, (det_num, 1))
 
         return np.degrees(x_tel), np.degrees(y_tel)
 
@@ -176,7 +247,6 @@ class apply_offset(object):
                 off_quat = quaternion.product(det_quat, xsc_quat)
 
                 xEL_offset, EL_offset, roll_offset = quaternion.quat2eul(off_quat)
-
 
                 # Verify if the signs are still the same as BLASTPol
                 xEL_corrected_temp = xEL-xEL_offset
@@ -270,7 +340,7 @@ class compute_offset(object):
         x_c = np.sum(xx*weight*self.map_data)/flux
         y_c = np.sum(yy*weight*self.map_data)/flux
 
-        return np.rint(x_c), np.rint(y_c)
+        return x_c, y_c
     
     def value(self):
 
@@ -278,8 +348,8 @@ class compute_offset(object):
         x_c, y_c = self.centroid()
                
         if self.ctype.lower() == 'ra and dec':
-            map_center = wcs.utils.pixel_to_skycoord(x_c, y_c, self.wcs_trans)
-
+            map_center = wcs.utils.pixel_to_skycoord(np.rint(x_c), np.rint(y_c), self.wcs_trans)
+            
             x_map = map_center.ra.hour
             y_map = map_center.dec.degree
 
@@ -308,8 +378,6 @@ class compute_offset(object):
         xel_ref = az_ref*np.cos(np.radians(el_ref))
 
         return xel_centr-xel_ref, el_ref+el_centr
-
-
 
 
         

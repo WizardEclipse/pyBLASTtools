@@ -9,3 +9,15 @@ v0.4.5: Solved a bug for loading data from master with different spf than the ct
         Added an option to interpolate data starting from roach indices 
 v0.4.6: Solved multiples bugs
         Changed the function to resample data from scipy.signal.resample to use interpolation
+v1.0: Reorganization of the mapmaker and pointing libraries
+      Rewrote peak finder code with more functionalities to select peaks and 
+      Added separate function to convert to 100 Hz
+      Change the functions to convert to equatorial or horizontal coordinates
+      Added new option to input the path for creating time 
+      Correct a bug in applying offset to the TOD
+      Changed the algorithm to detrend the TOD
+      Added multiple options to filter the data
+      Added some utils functions (change sampling frequency and remove drift)
+      Added options to give directly the field for master to the interpolation function in timing.py
+      Moved all the pointing conversion functions to astropy
+      Add options to return the offset level for a signal from the baseline
