@@ -60,7 +60,10 @@ class EasyGetData:
 
         self._df = df
         self.nframes = df.nframes
-        self._field_names = [name.decode() for name in df.field_list() if self.is_vector(name)]
+        self._field_names = [
+                name.decode() 
+                for name in df.field_list() 
+                if self.is_vector(name) and name != b"INDEX"]
 
 
     def read_data(self, arange: List[int]=(0,-1), fields: List[str]=None, base_spf: int=None):
