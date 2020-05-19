@@ -62,7 +62,7 @@ class EasyGetData:
 
         self._df = df
         self.nframes = df.nframes
-        self._field_names = [
+        self.field_names = [
                 name.decode() 
                 for name in df.field_list() 
                 if self.is_vector(name) and name != b"INDEX"]
@@ -93,7 +93,7 @@ class EasyGetData:
 
         # Sanitize fields
         if fields is None:
-            fields = self._field_names
+            fields = self.field_names
         fields = list(fields)
 
         # Sanitize spf
@@ -453,12 +453,16 @@ def main():
     if infile is None:
         USAGE()
 
-    df_in  = EasyGetData(infile, "r")
-    arange=(start_frame, end_frame)
-    data = df_in.read_data(arange=arange, fields=fields, spf=spf)
-
+    df_in  = EasyGetData(infile,  "r")
     df_out = EasyGetData(outfile, "w")
-    df_out.write_data(data=data, arange=arange)
+
+    if fields is None:
+        fields = df_in.field_names
+
+    for field in fields:
+        arange=(start_frame, end_frame)
+        data = df_in.read_data(arange=arange, fields=[field], spf=spf)
+        df_out.write_data(data=data, arange=arange)
 
 if __name__ == "__main__":
     main()
