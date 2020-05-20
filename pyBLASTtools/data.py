@@ -72,6 +72,8 @@ class data:
                 self.data_values[i] = self.d.getdata(i, first_sample=first_sample, num_samples=num_samples)
 
             len_fields = np.append(len_fields, len(self.data_values[i]))
+        
+        self.ref_field = ref_field
 
         if self.ref_field in field_list:
             self.ref_field_array = self.data_values[self.ref_field]
