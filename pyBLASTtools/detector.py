@@ -381,6 +381,7 @@ class detector_trend():
         if self.mask_array or isinstance(y, np.ma.core.MaskedArray):
             masked_array = np.ma.array(y, mask=self.mask)
             p = np.ma.polyfit(self.x, masked_array.T, order)
+            p = np.flip(p)
         else:
             p = np.polynomial.polynomial.polyfit(self.x, y.T, order)
 
@@ -411,7 +412,7 @@ class detector_trend():
         
         if baseline_type.lower() == 'poly':
             
-            coeffs = np.ones(int(order+1))
+            coeffs = np.ones((int(order+1), np.shape(self.data)[0]))
 
             if isinstance(y, np.ma.core.MaskedArray):
                 mask = y.mask

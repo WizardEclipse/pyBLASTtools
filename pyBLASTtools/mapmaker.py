@@ -121,7 +121,7 @@ class mapmaking(object):
         temp = np.zeros(int(shape_x*shape_y))
 
         for i in range(np.shape(points)[0]):
-            idx = np.ravel_multi_index(points[i].T, (shape_y, shape_x))
+            idx = np.ravel_multi_index(np.flip(points[i].T, axis=0), (shape_y, shape_x))
             temp += np.bincount(idx, weights=param[i], minlength=int(shape_x*shape_y))
 
         return np.reshape(temp, (shape_y, shape_x)) 

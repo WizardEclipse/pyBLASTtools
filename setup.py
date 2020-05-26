@@ -6,8 +6,8 @@ def read(fname):
 
 setup(
     name = "pyBLASTtools",
-    version = "1.0dev",
-    author = "Gabriele Coppi",
+    version = "1.0",
+    author = "BLAST Collaboration",
     description = ("A python package for BLAST-TNG data analysis"),
     packages=find_packages(),
     long_description=read('README.md'),

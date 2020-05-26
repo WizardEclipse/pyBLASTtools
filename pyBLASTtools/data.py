@@ -36,6 +36,11 @@ class data:
 
         self.d = gd.dirfile(path)
 
+        if ref_field is None:
+            self.ref_field = 'ctime_master_built'
+        else:
+            self.ref_field = ref_field
+
         if mode == 'frames':
             if idx_end == -1:
                 idx_end = self.d.nframes
@@ -43,11 +48,6 @@ class data:
             first_frame = int(idx_start)
             num_frames = int(idx_end)-int(idx_start)
         else:
-            if ref_field is None:
-                self.ref_field = 'ctime_master_built'
-            else:
-                self.ref_field = ref_field
-
             if idx_end == -1:
                 if field_list == 'full':                  
                     idx_end = self.d.array_len('ctime_master_built')
@@ -72,8 +72,6 @@ class data:
                 self.data_values[i] = self.d.getdata(i, first_sample=first_sample, num_samples=num_samples)
 
             len_fields = np.append(len_fields, len(self.data_values[i]))
-        
-        self.ref_field = ref_field
 
         if self.ref_field in field_list:
             self.ref_field_array = self.data_values[self.ref_field]
@@ -129,9 +127,6 @@ class data:
                                                                          self.d.spf(field), \
                                                                          self.d.spf(self.ref_field), \
                                                                          interpolation_kind='linear')
-
-
-
 
     def convert_to_array(self, interpolation_kind='linear'):
 
@@ -212,4 +207,4 @@ class data:
 
                 dd.putdata(i, self.data_values[i], (gd.FLOAT32, 1))
                 
-            
+
