@@ -380,10 +380,10 @@ class detector_trend():
 
         if self.mask_array or isinstance(y, np.ma.core.MaskedArray):
             masked_array = np.ma.array(y, mask=self.mask)
-            p = np.ma.polyfit(self.x, masked_array.T, order)
+            p = np.ma.polyfit(self.x, np.flip(masked_array.T, axis=1), order)
             p = np.flip(p)
         else:
-            p = np.polynomial.polynomial.polyfit(self.x, y.T, order)
+            p = np.polynomial.polynomial.polyfit(self.x, np.flip(y.T, axis=1), order)
 
         y_fin = np.polynomial.polynomial.polyval(self.x, p)
 

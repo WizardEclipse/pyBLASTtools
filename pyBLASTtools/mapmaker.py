@@ -1,15 +1,6 @@
 import numpy as np
-import sys
 from astropy import wcs
 from astropy.convolution import Gaussian2DKernel, convolve
-
-class Error(Exception):
-    """Base class for exceptions in this module."""
-    pass
-
-class MapError(Error):
-    """Exception raised for errors in the input. """
-    pass
 
 class wcs_world():
 
@@ -68,7 +59,10 @@ class wcs_world():
             self.pixel = np.zeros((det_num, len(coord1), 2), dtype=int)
 
         for i in range(det_num):
-            coord = np.transpose(np.array([coord1[i], coord2[i]]))
+            try:
+                coord = np.transpose(np.array([coord1[i], coord2[i]]))
+            except IndexError:
+                coord = np.transpose(np.array([coord1[0], coord2[0]]))
             self.pixel[i,:,:] = (np.floor(self.world2pix(coord))).astype(int)
 
     def reproject(self, world_original):
@@ -94,106 +88,276 @@ class mapmaking(object):
     def __init__(self, data, weight, polangle, pixelmap, crpix, Ionly=True, number=1, \
                  convolution=False, std=0., cdelt=0.):
 
-        self.data = data               #detector TOD
-        self.sigma = 1/weight**2           #weights associated with the detector values
-        self.polangle = polangle       #polarization angles of each detector
-        self.pixelmap = pixelmap      #Coordinates of each point in the TOD in pixel coordinates
+        self.data = data                     #detector TOD
+        self.sigma = 1/weight**2             #weights associated with the detector values
+        self.polangle = polangle             #polarization angles of each detector
+        self.pixelmap = pixelmap             #Coordinates of each point in the TOD in pixel coordinates
 
-        self.Ionly = Ionly             #Choose if a map only in Intensity
+        self.Ionly = Ionly                   #Choose if a map only in Intensity
         self.convolution = convolution       #If true a map is convolved with a gaussian
         
         if self.convolution:
             self.std_pixel = std/3600./np.abs(cdelt[0])
 
+        self.map_shape_x = int(np.ptp(self.pixelmap[:,:,0])+1)
+        self.map_shape_y = int(np.ptp(self.pixelmap[:,:,1])+1)
 
-    def pointing_matrix_binning(self, param):
-
-        shape_x = int(np.ptp(self.pixelmap[:,:,0])+1)
-        shape_y = int(np.ptp(self.pixelmap[:,:,1])+1)
-        
         x_min = np.amin(self.pixelmap[:,:,0])
         y_min = np.amin(self.pixelmap[:,:,1])
 
-        points = self.pixelmap.copy()
-        points[:,:,0] -= x_min
-        points[:,:,1] -= y_min
+        self.pixelmap[:,:,0] -= x_min
+        self.pixelmap[:,:,1] -= y_min
 
-        temp = np.zeros(int(shape_x*shape_y))
+        try:
+            from mpi4py import MPI
+            self.mpi = MPI
+            self.mpi_implementation = True
+            self.comm = MPI.COMM_WORLD
+            self.rank = self.comm.Get_rank()
+            self.nprocs = self.comm.Get_size()
+        except ImportError:
+            self.mpi_implementation = False
+            self.rank = 0
+            self.nprocs = 1
 
-        for i in range(np.shape(points)[0]):
-            idx = np.ravel_multi_index(np.flip(points[i].T, axis=0), (shape_y, shape_x))
-            temp += np.bincount(idx, weights=param[i], minlength=int(shape_x*shape_y))
 
-        return np.reshape(temp, (shape_y, shape_x)) 
-
-    def binning_map(self):
-
-        maps = []
-
-        I_est = self.pointing_matrix_binning(param=self.data)*self.sigma
-        hits = 0.5*self.pointing_matrix_binning(param=np.ones_like(self.data))
+    def pointing_matrix_binning(self, param, coord):
         
-        Imap = np.zeros_like(I_est)
+        idx = np.ravel_multi_index(np.flip(coord.T, axis=0), (self.map_shape_y, self.map_shape_x))
+        temp = np.bincount(idx, weights=param, minlength=int(self.map_shape_x*self.map_shape_y))
 
-        if self.Ionly:
-                        
-            Imap[hits>0] = I_est[hits>0]/hits[hits>0]
+        return np.reshape(temp, (self.map_shape_y, self.map_shape_x))
 
-            if self.convolution:
-                Imap = self.map_convolve(self.std_pixel, Imap)
+    def polarization_binning(self, I, Q, U, hits, c, s, c2, m):
 
-            maps.append(Imap)
+        Delta = (c**2*(c2-hits)+2*s*c*m-c2*s**2-\
+                 hits*(c2**2+m**2-c2*hits))
 
+        if np.any(Delta[hits>0]==0):
+            return None, None, None
         else:
-            try:
+            A = -(c2**2+m**2-c2*hits)
+            B = c*(c2-hits)+s*m
+            C = c*m-s*c2
+            D = -((c2-hits)*hits+s**2)
+            E = c*s-m*hits
+            F = c2*hits-c**2
+
+            Imap = np.zeros_like(I)
+            Qmap = np.zeros_like(I)
+            Umap = np.zeros_like(I)
+
+            Imap[hits>0] = (A[hits>0]*I[hits>0]+B[hits>0]*Q[hits>0]+\
+                            C[hits>0]*U[hits>0])/Delta[hits>0]
+            Qmap[hits>0] = (B[hits>0]*I[hits>0]+D[hits>0]*Q[hits>0]+\
+                            E[hits>0]*U[hits>0])/Delta[hits>0]
+            Umap[hits>0] = (C[hits>0]*I[hits>0]+E[hits>0]*Q[hits>0]+\
+                            F[hits>0]*U[hits>0])/Delta[hits>0]
+
+            return Imap, Qmap, Umap
+
+    def binning_map(self, coadd=False):
+
+        maps = {}
+
+        I_est = np.zeros((int(self.map_shape_y),int(self.map_shape_x)))
+        hits = np.zeros((int(self.map_shape_y),int(self.map_shape_x)))
+
+        if not self.Ionly:
+            Q_est = np.zeros((int(self.map_shape_y),int(self.map_shape_x)))
+            U_est = np.zeros((int(self.map_shape_y),int(self.map_shape_x)))
+
+            c_est = np.zeros((int(self.map_shape_y),int(self.map_shape_x)))
+            s_est = np.zeros((int(self.map_shape_y),int(self.map_shape_x)))
+
+            c2_est = np.zeros((int(self.map_shape_y),int(self.map_shape_x)))
+
+            m_est = np.zeros((int(self.map_shape_y),int(self.map_shape_x)))
+
+
+        if self.mpi_implementation:
+
+            if coadd:
+                I_est_total = np.zeros((int(self.map_shape_y),int(self.map_shape_x)))
+                hits_total = np.zeros((int(self.map_shape_y),int(self.map_shape_x)))
+
+                if not self.Ionly:
+
+                    Q_est_total = np.zeros((int(self.map_shape_y),int(self.map_shape_x)))
+                    U_est_total = np.zeros((int(self.map_shape_y),int(self.map_shape_x)))
+
+                    c_est_total = np.zeros((int(self.map_shape_y),int(self.map_shape_x)))
+                    s_est_total = np.zeros((int(self.map_shape_y),int(self.map_shape_x)))
+
+                    c2_est_total = np.zeros((int(self.map_shape_y),int(self.map_shape_x)))
+
+                    m_est_total = np.zeros((int(self.map_shape_y),int(self.map_shape_x)))
+            
+            else:
+                I_mpi = []
+
+                if not self.Ionly:
+                    Q_mpi = []
+                    U_mpi = []
+
+        if not coadd:
+            maps['I'] = {}
+
+            if not self.Ionly:
+                maps['Q'] = {}
+                maps['U'] = {}
+
+        for i in range(self.rank,np.shape(self.pixelmap)[0],self.nprocs):
+
+            I_temp = self.pointing_matrix_binning(param=self.data[i], coord=self.pixelmap[i])
+            hits_temp = 0.5*self.pointing_matrix_binning(param=np.ones_like(self.data[i]),\
+                                                         coord=self.pixelmap[i])
+
+            if not self.Ionly:
                 cos = np.cos(2.*self.polangle)
                 sin = np.sin(2.*self.polangle)
 
-                Q_est = self.pointing_matrix_binning(param=self.data*cos)*self.sigma
-                U_est = self.pointing_matrix_binning(param=self.data*sin)*self.sigma
+                Q_temp = self.pointing_matrix_binning(param=self.data[i]*cos, \
+                                                      coord=self.pixelmap[i])*self.sigma
+                U_temp = self.pointing_matrix_binning(param=self.data[i]*sin, \
+                                                      coord=self.pixelmap[i])*self.sigma
 
-                c = self.pointing_matrix_binning(param=0.5*cos)*self.sigma
-                s = self.pointing_matrix_binning(param=0.5*sin)*self.sigma
+                c_temp = self.pointing_matrix_binning(param=0.5*cos, coord=self.pixelmap[i])*self.sigma
+                s_temp = self.pointing_matrix_binning(param=0.5*sin, coord=self.pixelmap[i])*self.sigma
                 
-                c2 = self.pointing_matrix_binning(param=0.5*cos**2)*self.sigma
+                c2_temp = self.pointing_matrix_binning(param=0.5*cos**2, coord=self.pixelmap[i])*self.sigma
                 
-                m = self.pointing_matrix_binning(param=0.5*cos*sin)*self.sigma
+                m_temp = self.pointing_matrix_binning(param=0.5*cos*sin, coord=self.pixelmap[i])*self.sigma
 
-                Delta = (c**2*(c2-hits)+2*s*c*m-c2*s**2-\
-                         hits*(c2**2+m**2-c2*hits))
+            if coadd:
+                I_est += I_temp
+                hits += hits_temp
 
-                if np.any(Delta[hits>0]==0):
-                    raise MapError
+                if not self.Ionly:
+
+                    Q_est += Q_temp
+                    U_est += U_temp
+
+                    c_est += c_temp
+                    s_est += s_temp
+
+                    c2_est += c2_temp
+
+                    m_est += m_temp
+
+            else:
+
+                if self.Ionly:
+                    Imap = np.zeros((int(self.map_shape_y),int(self.map_shape_x)))
+                    Imap[hits_temp>0] = I_temp[hits_temp>0]/hits_temp[hits_temp>0]
+                
                 else:
-                    A = -(c2**2+m**2-c2*hits)
-                    B = c*(c2-hits)+s*m
-                    C = c*m-s*c2
-                    D = -((c2-hits)*hits+s**2)
-                    E = c*s-m*hits
-                    F = c2*hits-c**2
+                    Imap, Qmap, Umap = self.polarization_binning(I_temp, Q_temp, \
+                                                                 U_temp, hits_temp, \
+                                                                 c_temp, s_temp,\
+                                                                 c2_temp, m_temp)
 
-                    Qmap = np.zeros_like(I_est)
-                    Umap = np.zeros_like(I_est)
-
-                    Imap[hits>0] = (A[hits>0]*I_est[hits>0]+B[hits>0]*Q_est[hits>0]+\
-                                    C[hits>0]*U_est[hits>0])/Delta[hits>0]
-                    Qmap[hits>0] = (B[hits>0]*I_est[hits>0]+D[hits>0]*Q_est[hits>0]+\
-                                    E[hits>0]*U_est[hits>0])/Delta[hits>0]
-                    Umap[hits>0] = (C[hits>0]*I_est[hits>0]+E[hits>0]*Q_est[hits>0]+\
-                                    F[hits>0]*U_est[hits>0])/Delta[hits>0]
-
-                    if self.convolution:
-                        Imap = self.map_convolve(self.std_pixel, Imap)
+                if self.convolution:
+                    Imap = self.map_convolve(self.std_pixel, Imap)
+                    if not self.Ionly:
                         Qmap = self.map_convolve(self.std_pixel, Qmap)
                         Umap = self.map_convolve(self.std_pixel, Umap)
+                
+                if self.mpi_implementation:
+                    temp = {}
+                    temp['det_'+str(int(i))] = Imap
+                    I_mpi.append(temp)
 
-                    maps.append(Imap)
-                    maps.append(Qmap)
-                    maps.append(Umap)
+                    if not self.Ionly:
+                        temp = {}
+                        temp['det_'+str(int(i))] = Qmap
+                        Q_mpi.append(temp)
 
-            except MapError:
-                print('The matrix is singular in at least a pixel. Check the input data')
-                sys.exit(1)
+                        temp = {}
+                        temp['det_'+str(int(i))] = Umap
+                        U_mpi.append(temp)
+
+                else:
+                    maps['I']['det_'+str(int(i))] = Imap
+                    if not self.Ionly:
+                        maps['Q']['det_'+str(int(i))] = Qmap
+                        maps['U']['det_'+str(int(i))] = Umap
+
+        if coadd:
+            if self.mpi_implementation:
+                self.comm.Allreduce([I_est, self.mpi.DOUBLE], [I_est_total, self.mpi.DOUBLE], \
+                                    op=self.mpi.SUM)
+                self.comm.Allreduce([hits, self.mpi.DOUBLE], [hits_total, self.mpi.DOUBLE], \
+                                    op=self.mpi.SUM)
+
+                if self.Ionly:
+                    Imap = np.zeros_like(I_est_total)
+
+                    Imap[hits_total>0] = I_est_total[hits_total>0]/hits_total[hits_total>0]
+
+                    maps['I'] = Imap
+
+                else:
+                    self.comm.Allreduce([Q_est, self.mpi.DOUBLE], [Q_est_total, self.mpi.DOUBLE], \
+                                        op=self.mpi.SUM)
+                    self.comm.Allreduce([U_est, self.mpi.DOUBLE], [U_est_total, self.mpi.DOUBLE], \
+                                        op=self.mpi.SUM)
+                    
+                    self.comm.Allreduce([c_est, self.mpi.DOUBLE], [c_est_total, self.mpi.DOUBLE], \
+                                        op=self.mpi.SUM)
+                    self.comm.Allreduce([s_est, self.mpi.DOUBLE], [s_est_total, self.mpi.DOUBLE], \
+                                        op=self.mpi.SUM)
+
+                    self.comm.Allreduce([c2_est, self.mpi.DOUBLE], [c2_est_total, self.mpi.DOUBLE], \
+                                        op=self.mpi.SUM)
+
+                    self.comm.Allreduce([m_est, self.mpi.DOUBLE], [m_est_total, self.mpi.DOUBLE], \
+                                        op=self.mpi.SUM)
+
+                    
+                    maps['I'], maps['Q'], maps['U'] = self.polarization_binning(I_est_total, Q_est_total, \
+                                                                                U_est_total, hits_total, \
+                                                                                c_est_total, s_est_total,\
+                                                                                c2_est_total, m_est_total)
+
+            else:
+                if self.Ionly:
+                    Imap = np.zeros_like(I_est)
+                    Imap[hits>0] = I_est[hits>0]/hits_total[hits>0]
+                    maps['I'] = Imap
+
+                else:
+                    maps['I'], maps['Q'], maps['U'] = self.polarization_binning(I_est, Q_est, \
+                                                                                U_est, hits, \
+                                                                                c_est, s_est,\
+                                                                                c2_est, m_est)
+
+            if self.convolution:
+                maps['I'] = self.map_convolve(self.std_pixel, maps['I'])
+                if not self.Ionly:
+                    maps['Q'] = self.map_convolve(self.std_pixel, maps['Q'])
+                    maps['U'] = self.map_convolve(self.std_pixel, maps['U'])
+
+        else:
+            if self.mpi_implementation:
+                self.comm.Barrier()
+                
+                dataI = self.comm.allgather(I_mpi)
+
+                if not self.Ionly:
+                    dataQ = self.comm.allgather(Q_mpi)
+                    dataU = self.comm.allgather(U_mpi)
+                
+                if self.rank == 0:
+                    for h in range(len(dataI)):
+                        for j in range(len(dataI[h])):
+                            maps['I'].update(dataI[h][j])
+
+                            if not self.Ionly:
+                                maps['Q'].update(dataQ[h][j])
+                                maps['U'].update(dataU[h][j])
+
+                maps = self.comm.bcast(maps, root=0)
 
         return maps
 

@@ -21,3 +21,5 @@ v1.0: Reorganization of the mapmaker and pointing libraries
       Added options to give directly the field for master to the interpolation function in timing.py
       Moved all the pointing conversion functions to astropy
       Add options to return the offset level for a signal from the baseline
+v1.1: MPI implementation of mapmaker algorithm 
+      Possibility to generate single or coadded maps if multiple detectors set as input

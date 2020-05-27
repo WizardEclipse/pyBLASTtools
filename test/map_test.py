@@ -13,7 +13,7 @@ roach_file = list(compress(list_file, ['roach' in s for s in list_file]))
 
 ### Detector Parameters ###
 roach_number = 1
-detector_number = 10
+detector_number = 2
 
 ### Scan Parameters ###
 time_start = 1578323354+60*4.2
@@ -59,7 +59,7 @@ t = pbt.pointing.convert_to_telescope(ra, dec, pa=pa)
 radec = t.conversion()
 
 det = pbt.detector.kidsutils(data_dir=roach_file[int(roach_number-1)], roach_num=int(roach_number), \
-                             single=True, chan=int(detector_number), first_sample=d.idx_start_roach, \
+                             single=False, chan=int(detector_number), first_sample=d.idx_start_roach, \
                              last_sample=d.idx_end_roach)
 
 phase = det.phase
@@ -73,7 +73,6 @@ phase_trend = pbt.detector.detector_trend(phase)
 phase_detrend, baseline = phase_trend.fit_residual(baseline=True, return_baseline=True, \
                                                    baseline_type='poly', order=8, tol=5e-4)
 
-
 final_ra = radec[0][:,~mask]
 final_dec = radec[1][:,~mask]
 final_det = phase_detrend.data[:,~mask]
@@ -84,11 +83,13 @@ crval = np.array([np.median(radec[0]), np.median(radec[1])])
 pixel_size = np.array([35./3600., 35./3600.])
 
 wcs = pbt.mapmaker.wcs_world(crpix=crpix, cdelt=pixel_size, crval=crval, telcoord=True)
-wcs.wcs_proj(final_ra, final_dec, 1)
+wcs.wcs_proj(final_ra, final_dec, np.shape(final_det)[0])
 
 proj = wcs.w.copy()
 w = wcs.pixel.copy()
 
 maps=pbt.mapmaker.mapmaking(final_det, 1., np.zeros(len(phase_detrend)), w, crpix)
 
-maps = maps.binning_map()
+maps = maps.binning_map(coadd=True)
+
+print(maps['I'])

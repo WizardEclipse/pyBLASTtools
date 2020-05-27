@@ -3,7 +3,6 @@ from scipy.linalg import svd
 from scipy.optimize import least_squares
 from photutils import find_peaks
 from astropy.stats import sigma_clipped_stats
-import matplotlib.pyplot as plt
 
 def centroid(map_data, pixel1_coord, pixel2_coord, threshold=0.275):
 
