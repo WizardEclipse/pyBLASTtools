@@ -624,4 +624,13 @@ class kidsutils():
         # Second, apply the filter
         filtered_data = sgn.filtfilt(B,A, data)
         return filtered_data
-
+   
+    def filter_targs(self, I_targ, Q_targ,W=0.1):
+      I_targ_ds,Q_targ_ds = [],[] 
+      for i in range(len(I_targ)):
+        I, Q = I_targ[i], Q_targ[i]
+        I_ds_f = self.butter(I,N=4,Wn=W,typ="low") 
+        Q_ds_f = self.butter(Q,N=4,Wn=W,typ="low")
+        Q_targ_ds.append(Q_ds_f)
+        I_targ_ds.append(I_ds_f)
+      return np.array(I_targ_ds), np.array(Q_targ_ds)
