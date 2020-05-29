@@ -226,6 +226,7 @@ class filterdata:
         order parameter is the order of the butterworth filter
         '''
         sos = self.butter_filter(order, filter_type)
+        
         filterdata = sgn.sosfiltfilt(sos, self.data)
         return filterdata
 
@@ -515,21 +516,47 @@ class kidsutils:
         if self.I is None and self.Q is None:
             data_dir = kwargs.get('data_dir')
             roach_num = kwargs.get('roach_num')
-            single = kwargs.get('single', False)
-            chan = kwargs.get('chan')
-            first_sample = kwargs.get('first_sample')
-            last_sample = kwargs.get('last_sample')
+            self.single = kwargs.get('single', False)
+            self.chan = kwargs.get('chan')
+            self.first_sample = kwargs.get('first_sample')
+            self.last_sample = kwargs.get('last_sample')
 
-            if (data_dir is not None and roach_num is not None and single is not None and \
-                chan is not None and first_sample is not None and last_sample is not None):
+            if (data_dir is not None and roach_num is not None and self.single is not None and \
+                self.chan is not None and self.first_sample is not None and self.last_sample is not None):
 
-                self.getTs(data_dir, roach_num, single, chan, first_sample, last_sample)
+                self.getTs(data_dir, roach_num, self.single, self.chan, self.first_sample, self.last_sample)
+
+        self.Z = None 
+
+        self.phase = None
+        self.mag = None
 
         if self.I is not None and self.Q is not None:
+
+            ### Complex Timestream ###
+            self.Z = self.I + 1j*self.Q 
+
             self.phase = self.KIDphase()
             self.mag = self.KIDmag()
+        
     
     def getTs(self, data_dir, roach_num, single, chan, start_samp, stop_samp):
+
+        '''
+        Load the detector timestreams using the following parameters:
+        - data_dir: directory with the detector data
+        - roach_num: roach number of the detectors to be loaded
+        - single: the channel parameter is intended as single channel or the upper value of 
+                  all the channels to be loaded
+        - chan: a single float number that can be interpreted as the channel to be loaded 
+                or as the upper value of a list of channel to be loaded
+        - first_sample: first sample of the TOD to be read
+        - last_sample: last sample of the TOD to be read
+
+        If these parameters are given as input to the class, it is not necessary to call this method
+        in the main script.
+        '''
+
         fdir = gd.dirfile(data_dir)
 
         if single:
@@ -580,10 +607,15 @@ class kidsutils:
 
         return np.sqrt(self.I**2+self.Q**2)
 
-    def loadBinarySweepData(self,path_to_sweep, vna = True):
-        """
+    def loadBinarySweepData(self, path_to_sweep, vna = True):
+        '''
+        Function to load the the sweep from a sweep.
+        Parameters:
+        - path_to_sweep: path with the sweep file
+        - vna: if True, the VNA sweep data is used.
+
         From plotPipeline.py - Sam Gordon
-        """
+        '''
         try:
             all_files = (os.listdir(path_to_sweep))
             sweep_freqs = np.loadtxt(os.path.join(path_to_sweep, "sweep_freqs.dat"), dtype = "float")
@@ -609,78 +641,117 @@ class kidsutils:
             return chan_I, chan_Q
         return chan_I, chan_Q
 
-    def get_df_gradients(self, chan, s21_f, timestream, shift_idx = 2):
-        """
-        Calculate delta f timestream and return both frequency and dissipation direction timestreams
-        """
-        delta_f = 1000.0 # Hz
-        dI, dQ = np.diff(s21_f.real[chan]), np.diff(s21_f.imag[chan])
-        dIdf, dQdf = dI/delta_f, dQ/delta_f
-        Mag = np.sqrt(s21_f.real[chan]**2+s21_f.imag[chan]**2)
-        dMag = np.sqrt(dIdf**2+dQdf**2)
-        max_idx = np.where(dMag==max(dMag))[0][0]
-        min_idx = np.where(Mag==min(Mag))[0][0]
-        I, Q = timestream.real[chan], timestream.imag[chan]
-        df_x = np.copy((I*dIdf[min_idx+shift_idx] + Q*dQdf[min_idx+shift_idx])/dMag[min_idx+shift_idx]**2)
-        df_y  = np.copy((Q*dIdf[min_idx+shift_idx] - I*dQdf[min_idx+shift_idx])/dMag[min_idx+shift_idx]**2)
-        return df_x,df_y
+    def get_df(self, **kwargs):
 
-    def get_all_df_gradients(self, s21_f, timestream, shift_idx = 2):
-        """
-        Calculate delta f timestream and return both frequency and dissipation direction timestreams
-        """
-        delta_f = 1000.0 # Hz
-        num_channels = len(timestream) 
-        dI, dQ = np.diff(s21_f.real), np.diff(s21_f.imag)
-        dIdf, dQdf = dI/delta_f, dQ/delta_f
-        Mag = np.sqrt(s21_f.real**2+s21_f.imag**2)
-        Mag = np.delete(Mag,len(Mag[0])-1,1)
+        '''
+        Compute df of a timestream and return frequency and dissipation direction
+        Parameters:
+        - s21_f: the complex sweep stream
+        - path_to_sweep: if there is no s21_f it is possible to give the path for sweep files
+                         to estimate s21_f
+        - vna: if True, the sweep files to be loaded come from a VNA sweep
+        - despike: if True, the newly loaded s21_f are despiked using a butterworth filter 
+                   with the following arguments:
+                   - std: standard deviation in unit of sigma to exclude outliers. Default at 5
+                   - cutoff: cutoff frequency of the filter. Default at  0.1Hz
+        - delta_f: size in Hz of the df. Default at 1000
+        - idx_shift: index for shifting. Default at 2
+        - timestream: detector complex timestream. If not set, it will be used self.Z 
+        '''
+
+        path_to_sweep = kwargs.get('path_to_sweep')
+        vna = kwargs.get('vna', False)
+
+        if path_to_sweep is None:
+            s21_f = kwargs.get('s21_f')
+            s21_f_real, s21_f_imag = s21_f.real, s21_f.imag
+        else:
+            s21_f_real, s21_f_imag = self.loadBinarySweepData(path_to_sweep, vna)
+            despike = kwargs.get('despike', True)
+            
+            if despike:
+                std = kwargs.get('std', 5)
+                cutoff = kwargs.get('cutoff', 0.1)
+                s21_f_real, s21_f_imag = self.despike_sweeps(s21_f_real, s21_f_imag, std=std, cutoff=cutoff)
+
+        try: 
+            single_chan = self.single
+        except AttributeError:
+            single_chan = kwargs.get('single', True)
+
+        try: 
+            channel = self.chan
+        except AttributeError:
+            channel = kwargs.get('chan')
+
+        delta_f = kwargs.get('df', 1000)
+        shift_idx = kwargs.get('shift_idx', 2)
+
+        timestream = kwargs.get('timestream')
+
+        if timestream is None:
+            timestream = self.Z
+
+        if single_chan:
+            dI, dQ = np.array([np.diff(s21_f_real[channel])]), np.array([np.diff(s21_f_imag[channel])])
+            Mag = np.array([np.sqrt(s21_f_real[channel]**2+s21_f_imag[channel]**2)])
+        else:
+            dI, dQ = np.diff(s21_f_real[:channel]), np.diff(s21_f_imag[:channel])
+            Mag = np.sqrt(s21_f_real[:channel]**2+s21_f_imag[:channel]**2)
+
+        dIdf, dQdf = dI/delta_f, dQ/delta_f        
         dMag = np.sqrt(dIdf**2+dQdf**2)
-        # roll by shift_idx
-        dIdf, dQdf, dMag = np.roll(dIdf,-shift_idx), np.roll(dQdf,-shift_idx), np.roll(dMag,-shift_idx)
-        # Find max/min for each channel
-        min_indices, max_indices = np.zeros(num_channels).astype("int"), np.zeros(num_channels).astype("int")
+        
+        dIdf, dQdf, dMag = np.roll(dIdf,-shift_idx, axis=1), np.roll(dQdf,-shift_idx, axis=1), \
+                           np.roll(dMag,-shift_idx, axis=1)
+
+        min_indices = np.zeros(np.shape(timestream)[0]).astype("int")
         dIdf_min, dQdf_min, dMag_min = np.zeros(len(dIdf)), np.zeros(len(dIdf)), np.zeros(len(dIdf))
-        for i in range(num_channels):
+
+        for i in range(np.shape(timestream)[0]):
             min_idx = np.where(Mag[i]==min(Mag[i]))[0][0]
             min_indices[i] = min_idx
             dIdf_min[i] = dIdf[i][min_indices[i]]
             dQdf_min[i] = dQdf[i][min_indices[i]]
             dMag_min[i] = dMag[i][min_indices[i]]
-        I, Q = timestream.real, timestream.imag
-        df_x = np.copy((I.T*dIdf_min + Q.T*dQdf_min)/dMag_min**2).T
-        df_y  = np.copy((Q.T*dIdf_min - I.T*dQdf_min)/dMag_min**2).T
-        return df_x, df_y 
+        
+        df_x = np.copy((timestream.real.T*dIdf_min + timestream.imag.T*dQdf_min)/dMag_min**2).T
+        df_y  = np.copy((timestream.imag.T*dIdf_min - timestream.real.T*dQdf_min)/dMag_min**2).T
+        
+        return df_x, df_y
 
-    def despike_targs(self, I_targ, Q_targ,std=5,W=0.1):
-        I_targ_ds,Q_targ_ds = [],[] 
+    def despike_sweeps(self, I_targ, Q_targ, std=5, cutoff=0.1):
+
+        '''
+        Despike the sweep using a butterworth filter
+        Parameters:
+        - I_targ: real component of the the sweep
+        - Q_targ: imaginary component of the the sweep
+        - std: standard deviation in unit of sigma
+        - cutoff: cutoff frequency of the filter
+        '''
+
+        I_targ_ds,Q_targ_ds = np.array([]), np.array([]) 
         for i in range(len(I_targ)):
-            I, Q = I_targ[i], Q_targ[i]
-            I_idx = self.removeStd(I,s=std)
-            I, Q = I[I_idx],Q[I_idx]
-            Q_idx = self.removeStd(Q,s=std)
-            I, Q = I[Q_idx],Q[Q_idx]
+            I_temp, Q_temp = I_targ[i], Q_targ[i]
+            I_idx = self.removeStd(I_temp,s=std)
+            I_temp, Q_temp = I_temp[I_idx],Q_temp[I_idx]
+            Q_idx = self.removeStd(Q_temp,s=std)
+            I_temp, Q_temp = I_temp[Q_idx],Q_temp[Q_idx]
 
-            I_filt = filterdata(I, W)
-            Q_filt = filterdata(Q, W)
+            I_filt = filterdata(I_temp, cutoff)
+            Q_filt = filterdata(Q_temp, cutoff)
 
             I_ds_f = I_filt.butter_filter_data(order=4, filter_type="highpass") 
             Q_ds_f = Q_filt.butter_filter_data(order=4, filter_type="highpass")
-            Q_targ_ds.append(Q_ds_f)
-            I_targ_ds.append(I_ds_f)
-        return np.array(I_targ_ds), np.array(Q_targ_ds)
 
-    def removeStd(self, I,s=5.):
-        std = np.std(I)
-        m = np.mean(I)
-        return np.where(np.abs(I-m)<std*s)
+            I_targ_ds = np.append(I_targ_ds, I_ds_f)
+            Q_targ_ds = np.append(Q_targ_ds, Q_ds_f)
 
-    def butter(self,data,N=2,Wn=0.01,typ="high"):
-        """
-        N is filter order, Wn is cutoff frequency, and data is the data to filter
-        """
-        B, A = sgn.butter(N, Wn, btype=typ,output='ba')
-        # Second, apply the filter
-        filtered_data = sgn.filtfilt(B,A, data)
-        return filtered_data
+        return I_targ_ds, Q_targ_ds
+
+    def removeStd(self, var, s=5.):
+        std = np.std(var)
+        m = np.mean(var)
+        return np.where(np.abs(var-m)<std*s)
 

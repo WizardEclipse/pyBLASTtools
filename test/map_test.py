@@ -3,12 +3,14 @@ import glob as gl
 from itertools import compress
 import matplotlib.pyplot as plt
 import numpy as np
+import os
 
 path = '/media/gabriele/mac'
 
 list_file = gl.glob(path+'/*')
 
-master_file = list_file['master' in list_file]
+master_file = [s for s in list_file  if 'master'  in s]
+master_file = master_file[0]
 roach_file = list(compress(list_file, ['roach' in s for s in list_file]))
 
 ### Detector Parameters ###
@@ -62,20 +64,28 @@ det = pbt.detector.kidsutils(data_dir=roach_file[int(roach_number-1)], roach_num
                              single=False, chan=int(detector_number), first_sample=d.idx_start_roach, \
                              last_sample=d.idx_end_roach)
 
-phase = det.phase
+path_file = os.path.dirname(os.path.abspath(__file__))
+flight_targ = np.load(path_file+'/flight_targ_rel_paths.npy')
+flight_targ = flight_targ.astype("str")
 
-mask = np.zeros_like(phase[0], dtype=bool)
-mask[idx_mask_start:idx_mask_end] = True
+df_x, df_y = det.get_df(path_to_sweep=path+'/'+flight_targ[roach_number-1])
 
-phase = np.ma.array(phase, mask=np.tile(mask, (np.shape(phase)[0], 1)))
+sys.exit()
 
-phase_trend = pbt.detector.detector_trend(phase)
-phase_detrend, baseline = phase_trend.fit_residual(baseline=True, return_baseline=True, \
-                                                   baseline_type='poly', order=8, tol=5e-4)
+# phase = det.phase
 
-final_ra = radec[0][:,~mask]
-final_dec = radec[1][:,~mask]
-final_det = phase_detrend.data[:,~mask]
+# mask = np.zeros_like(phase[0], dtype=bool)
+# mask[idx_mask_start:idx_mask_end] = True
+
+# phase = np.ma.array(phase, mask=np.tile(mask, (np.shape(phase)[0], 1)))
+
+# phase_trend = pbt.detector.detector_trend(phase)
+# phase_detrend, baseline = phase_trend.fit_residual(baseline=True, return_baseline=True, \
+#                                                    baseline_type='poly', order=8, tol=5e-4)
+
+# final_ra = radec[0][:,~mask]
+# final_dec = radec[1][:,~mask]
+# final_det = phase_detrend.data[:,~mask]
 
 ctype = 'RA and DEC'
 crpix = np.array([50.,50.])
