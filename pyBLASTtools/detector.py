@@ -1,7 +1,8 @@
 import numpy as np
 import scipy.signal as sgn
 import pygetdata as gd
-import sys, os
+import sys
+import os
 from scipy import interpolate
 
 class Error(Exception):
@@ -12,7 +13,7 @@ class InputError(Error):
     """Exception raised for errors in the input. """
     pass
         
-class despike():
+class despike:
 
     '''
     Class to despike the TOD
@@ -26,7 +27,7 @@ class despike():
 
         - data: signal that needs to be analyzed
         - remove_mean: a parameter to choose if the mean is removed from the signal that needs 
-                       to be analyzed
+                       to be analyzed just for the purpose of searching peaks
         - mean_std_distance: a parameter used to compute the useful data for estimating the mean 
                              and std of the signal. 
                              This parameter is given by (data-mean(data))/np.mean(data)
@@ -42,21 +43,25 @@ class despike():
         '''
 
         self.data = data
+
         self.remove_mean = remove_mean
-        self.mean_std_distance = mean_std_distance
 
-        if self.mean_std_distance < 1e-5 or self.mean_std_distance > 1:
-            self.mean_std_distance = 0.3
+        if mean_std_distance < 1e-5 or mean_std_distance > 1:
+            mean_std_distance = 0.3
 
-        val = (self.data-np.mean(self.data))/np.mean(self.data)
+        val = (data-np.mean(data, axis=1))/np.mean(data, axis=1)
+        
+        self.signal_mean = np.zeros(np.shape(data)[0])
+        self.signal_std = np.zeros(np.shape(data)[0])
 
-        self.signal_std = np.std(self.data[val<mean_std_distance])
-        self.signal_mean = np.mean(self.data[val<mean_std_distance])
+        for i in range(np.shape(self.data)[0]):
+            self.signal_std[i] = np.std(self.data[i,val[i]<mean_std_distance], axis=1)
+            self.signal_mean[i] = np.mean(self.data[i,val[i]<mean_std_distance], axis=1)
         
         if remove_mean:
-            self.signal = self.data-self.signal_mean
+            self.signal = data-self.signal_mean
         else:
-            self.signal = self.data.copy()
+            self.signal = data
 
         if hthres is not None:
             self.hthres = hthres*self.signal_std
@@ -78,20 +83,34 @@ class despike():
         else:
             self.width = np.array([1,200])
 
-        self.idx_peak, self.param_peak = sgn.find_peaks(np.abs(self.signal), height=self.hthres, \
-                                                        prominence=self.pthres, \
-                                                        threshold=self.thres, width=self.width, \
-                                                        rel_height=rel_height)
+        self.idx_peak = []
+        self.param_peak = []
+
+        for i in range(np.shape(self.signal)[0]):
+
+            peak_temp, param_temp = sgn.find_peaks(np.abs(self.signal[i]), height=self.hthres, \
+                                                   prominence=self.pthres, \
+                                                   threshold=self.thres, width=self.width, \
+                                                   rel_height=rel_height)
+            
+            self.idx_peak.append(peak_temp)
+            self.param_peak.append(param_temp)
 
         if full_width:
-            param_temp = sgn.peak_widths(np.abs(self.signal), peaks=self.idx_peak, rel_height=1.)
 
-            ledge = np.append(param_temp[-2][0], np.maximum(param_temp[-2][1:], param_temp[-1][:-1]))
-            redge = np.append(np.minimum(param_temp[-2][1:], param_temp[-1][:-1]), param_temp[-1][-1])
+            for i in range(np.shape(self.signal)[0]):
+                param_temp = sgn.peak_widths(np.abs(self.signal[i]), peaks=self.idx_peak, rel_height=1.)
 
-            self.param_peak['widths'] = param_temp[0]
-            self.param_peak['left_ips'] = ledge
-            self.param_peak['right_ips'] = redge
+                ledge = np.append(param_temp[-2][0], np.maximum(param_temp[-2][1:], param_temp[-1][:-1]))
+                redge = np.append(np.minimum(param_temp[-2][1:], param_temp[-1][:-1]), param_temp[-1][-1])
+
+                self.param_peak[i]['widths'] = param_temp[0]
+                self.param_peak[i]['left_ips'] = ledge
+                self.param_peak[i]['right_ips'] = redge
+
+        for i in range(np.shape(self.signal)[0]):
+            self.param_peak[i]['left_ips'] = (np.floor(self.param_peak[i]['left_ips'])).astype(int)
+            self.param_peak[i]['right_ips'] = (np.floor(self.param_peak[i]['right_ips'])).astype(int)
 
     def replace_peak(self, peaks=None, ledge=None, redge=None, window=1000):
 
@@ -107,70 +126,71 @@ class despike():
 
         x_inter = np.array([], dtype = 'int')
 
-        replaced = self.signal.copy()
+        replaced = self.data.copy()
 
-        if peaks is None:
-            peaks = self.idx_peak
+        for j in range(np.shape(self.data)[0]):
+            if peaks is None:
+                peaks = self.idx_peak[j]
 
-        if ledge is None:
-            ledge = self.param_peak['left_ips']
-        else:
-            if isinstance(ledge, np.ndarray):
-                if len(ledge) != len(peaks):
-                    ledge = peaks-np.amax(ledge)
+            if ledge is None:
+                ledge = self.param_peak[j]['left_ips']
+            else:
+                if isinstance(ledge, np.ndarray):
+                    if len(ledge) != len(peaks):
+                        ledge = peaks-np.amax(ledge)
+                    else:
+                        ledge = ledge
                 else:
-                    ledge = ledge
-            else:
-                ledge = peaks-np.amax(ledge)            
+                    ledge = peaks-np.amax(ledge)            
 
-        if redge is None:
-            redge = self.param_peak['right_ips']
-        else:
-            if isinstance(redge, np.ndarray):
-                if len(redge) != len(peaks):
-                    redge = peaks+np.amax(redge)
+            if redge is None:
+                redge = self.param_peak[j]['right_ips']
+            else:
+                if isinstance(redge, np.ndarray):
+                    if len(redge) != len(peaks):
+                        redge = peaks+np.amax(redge)
+                    else:
+                        redge = redge
                 else:
-                    redge = redge
-            else:
-                redge = peaks+np.amax(redge)  
+                    redge = peaks+np.amax(redge)  
 
-            idx_redge, = np.where(redge>peaks[-1])
+                idx_redge, = np.where(redge>peaks[-1])
 
-            redge[idx_redge] = peaks[-1]
+                redge[idx_redge] = peaks[-1]
 
-        ledge = np.floor(ledge).astype(int)
-        redge = np.ceil(redge).astype(int)
+            ledge = np.floor(ledge).astype(int)
+            redge = np.ceil(redge).astype(int)
 
-        for i in range(0, len(peaks)):
-            
-            idx=np.arange(ledge[i]-1, redge[i]+1) #Added and removed 1 just to consider eventual rounding
-            x_inter = np.append(x_inter, idx)
+            for i in range(0, len(peaks)):
+                
+                idx=np.arange(ledge[i]-1, redge[i]+1) #Added and removed 1 just to consider eventual rounding
+                x_inter = np.append(x_inter, idx)
 
-            array_temp = np.append(replaced[ledge[i]-window-1:ledge[i]-1], \
-                                   replaced[redge[i]+1:redge[i]+window+1])
+                array_temp = np.append(replaced[j][ledge[i]-window-1:ledge[i]-1], \
+                                       replaced[j][redge[i]+1:redge[i]+window+1])
 
-            mean_temp = np.mean(array_temp)
-            std_temp = np.std(array_temp)
-            var_temp = np.var(array_temp)
+                mean_temp = np.mean(array_temp)
+                std_temp = np.std(array_temp)
+                var_temp = np.var(array_temp)
 
-            p_stat = np.abs(np.abs(mean_temp/var_temp)-1.)
+                p_stat = np.abs(np.abs(mean_temp/var_temp)-1.)
 
-            if p_stat <= 1e-2:
-                val = np.random.poisson(mean_temp, len(idx))
-                replaced[ledge[i]-1:redge[i]+1] = val
-            else:
-                val = np.random.normal(mean_temp, std_temp, len(idx))
-                replaced[ledge[i]-1:redge[i]+1] = val
+                if p_stat <= 1e-2:
+                    val = np.random.poisson(mean_temp, len(idx))
+                    replaced[j][ledge[i]-1:redge[i]+1] = val
+                else:
+                    val = np.random.normal(mean_temp, std_temp, len(idx))
+                    replaced[j][ledge[i]-1:redge[i]+1] = val
 
         return replaced
 
-class filterdata():
+class filterdata:
 
     '''
     class for filter the detector TOD
     '''
 
-    def __init__(self, data, cutoff, fs):
+    def __init__(self, data, cutoff, fs=None):
         
         '''
         See data_cleaned for parameters explanantion
@@ -178,7 +198,10 @@ class filterdata():
 
         self.data = data
         self.cutoff = cutoff
-        self.fs = fs
+        if fs is None:
+            self.fs = 488.28125
+        else:
+            self.fs = fs
     
     def butter_filter(self, order, filter_type='highpass'):
 
@@ -194,10 +217,7 @@ class filterdata():
             print('The filter type choosen is not correct. Choose between highpass and lowpass')
             sys.exit(1)
         
-        nyq = 0.5*self.fs
-        normal_cutoff = self.cutoff / nyq
-        b, a = sgn.butter(order, normal_cutoff, btype=filter_type, analog=False)
-        return b, a
+        return sgn.butter(order, self.cutoff, btype=filter_type, analog=False, output='sos')
 
     def butter_filter_data(self, order=5, filter_type='highpass'):
 
@@ -205,8 +225,8 @@ class filterdata():
         Data filtered with a butterworth filter 
         order parameter is the order of the butterworth filter
         '''
-        b, a = self.butter_filter(order, filter_type)
-        filterdata = sgn.lfilter(b, a, self.data)
+        sos = self.butter_filter(order, filter_type)
+        filterdata = sgn.sosfiltfilt(sos, self.data)
         return filterdata
 
     def cosine_filter(self, f, filter_type='highpass'):
@@ -246,25 +266,25 @@ class filterdata():
 
         if window is True:
             if window_type.lower() == 'hanning':
-                window_data = np.hanning(len(self.data))
+                window_data = np.hanning(len(self.data[0]))
             elif window_type.lower() == 'bartlett':
-                window_data = np.bartlett(len(self.data))
+                window_data = np.bartlett(len(self.data[0]))
             elif window_type.lower() == 'blackman':
-                window_data = np.blackman(len(self.data))
+                window_data = np.blackman(len(self.data[0]))
             elif window_type.lower() == 'hamming':
-                window_data = np.hamming(len(self.data))
+                window_data = np.hamming(len(self.data[0]))
             elif window_type.lower() == 'kaiser':
-                window_data = np.kaiser(len(self.data), beta_kaiser)
+                window_data = np.kaiser(len(self.data[0]), beta_kaiser)
 
             fft_data = np.fft.rfft(self.data*window_data)
         else:
             fft_data = np.fft.rfft(self.data)
 
-        fft_frequency = np.fft.rfftfreq(np.size(self.data), 1/self.fs)
+        fft_frequency = np.fft.rfftfreq(np.size(self.data[0]), 1/self.fs)
 
         vect = np.vectorize(self.cosine_filter, otypes=[np.float])
 
-        ifft_data = np.fft.irfft(vect(fft_frequency, filter_type)*fft_data, len(self.data))
+        ifft_data = np.fft.irfft(vect(fft_frequency, filter_type)*fft_data, len(self.data[0]))
 
         return ifft_data
 
@@ -328,18 +348,19 @@ class detector_trend():
     def __init__(self, data, remove_signal=False):
         
         self.data = data
-        self.x = np.arange(len(self.data))
+        self.x = np.arange(len(self.data[0]))
 
         if isinstance(self.data, np.ma.core.MaskedArray):
             self.mask = self.data.mask
 
         if remove_signal:
-            signal = despike(data, thres=None, hthres=None, width=250, rel_height=0.75)
             self.mask = np.zeros_like(data, dtype=bool)
-            ledge = np.floor(signal.param_peak['left_ips']).astype(int)
-            redge = np.floor(signal.param_peak['right_ips']).astype(int)
-            for j in range(len(ledge)):
-                self.mask[ledge[j]:redge[j]] = True
+            signal = despike(data, thres=None, hthres=None, width=250, rel_height=0.75)
+            for i in range(np.shape(self.mask)[0]):
+                ledge = np.floor(signal.param_peak[i]['left_ips']).astype(int)
+                redge = np.floor(signal.param_peak[i]['right_ips']).astype(int)
+                for j in range(len(ledge)):
+                    self.mask[ledge[j]:redge[j]] = True
             self.mask_array = True
         else:
             self.mask_array = False
@@ -359,12 +380,11 @@ class detector_trend():
 
         if self.mask_array or isinstance(y, np.ma.core.MaskedArray):
             masked_array = np.ma.array(y, mask=self.mask)
-            p = np.ma.polyfit(self.x, masked_array, order)
+            p = np.ma.polyfit(self.x, masked_array.T, order)
         else:
-            p = np.polyfit(self.x, y, order)
-        
-        poly = np.poly1d(p)
-        y_fin = poly(self.x)
+            p = np.polynomial.polynomial.polyfit(self.x, y.T, order)
+
+        y_fin = np.polynomial.polynomial.polyval(self.x, p)
 
         return y_fin, p
 
@@ -410,29 +430,34 @@ class detector_trend():
                 coeffs = coeffs_new
                 y = np.minimum(y, base)
 
-            poly = np.poly1d(coeffs)
+            self.offset = coeffs[-1,:]
 
-            self.offset = coeffs[-1]
-
-            return poly(self.x)
+            return np.polynomial.polynomial.polyval(self.x, coeffs)
 
         elif baseline_type.lower() == 'inter':
 
             points = np.ones(len(y))*np.mean(y)
+            self.offset = np.zeros(np.shape(y)[0])
+            base_inter = np.zeros_like(y)
 
-            for i in range(iter_val):
-                f = interpolate.UnivariateSpline(np.arange(len(y)), y, s=interpolation_smooth)
-                base = f(np.arange(len(y)))
+            for j in range(np.shape(y)[0]):
+                z = y[j]
+                points = np.ones(len(z))*np.mean(z)
+                for i in range(iter_val):
+                    f = interpolate.UnivariateSpline(np.arange(len(z)), z, s=interpolation_smooth)
+                    base = f(np.arange(len(z)))
 
-                if np.all(np.abs(base-points)<tol):
-                    break
+                    if np.all(np.abs(base-points)<tol):
+                        break
 
-                y = np.minimum(y, base)
-                points = base
+                    z = np.minimum(z, base)
+                    points = base
 
-            self.offset = np.mean(base[:1000])
+                base_inter[j] = base
+                self.offset[j] = np.mean(base[:1000])
 
-            return base
+            return base_inter
+
     
     def fit_residual(self, order=6, baseline=False, return_baseline=False, \
                      baseline_type='poly', interpolation_smooth=2.0,\
@@ -461,20 +486,65 @@ class detector_trend():
 
             return self.offset
 
-class kidsutils():
+class kidsutils:
 
     '''
     Class containing useful functions for KIDs
     '''
 
-    def __init__(self): #, I, Q):
+    def __init__(self, **kwargs):
 
-        #self.I = I
-        #self.Q = Q
+        '''
+        Possible arguments:
+        - I: I of a detector as an array
+        - Q: Q of a detector as an array
+        - data_dir: directory with the detector data
+        - roach_num: roach number of the detectors to be loaded
+        - single: the channel parameter is intended as single channel or the upper value of 
+                  all the channels to be loaded
+        - chan: a single float number that can be interpreted as the channel to be loaded 
+                or as the upper value of a list of channel to be loaded
+        - first_sample: first sample of the TOD to be read
+        - last_sample: last sample of the TOD to be read
+        '''
 
-        #self.phase = self.KIDphase()
-        #self.mag = self.KIDmag()
-        return
+        self.I = kwargs.get('I')
+        self.Q = kwargs.get('Q')
+
+        if self.I is None and self.Q is None:
+            data_dir = kwargs.get('data_dir')
+            roach_num = kwargs.get('roach_num')
+            single = kwargs.get('single', False)
+            chan = kwargs.get('chan')
+            first_sample = kwargs.get('first_sample')
+            last_sample = kwargs.get('last_sample')
+
+            if (data_dir is not None and roach_num is not None and single is not None and \
+                chan is not None and first_sample is not None and last_sample is not None):
+
+                self.getTs(data_dir, roach_num, single, chan, first_sample, last_sample)
+
+        if self.I is not None and self.Q is not None:
+            self.phase = self.KIDphase()
+            self.mag = self.KIDmag()
+    
+    def getTs(self, data_dir, roach_num, single, chan, start_samp, stop_samp):
+        fdir = gd.dirfile(data_dir)
+
+        if single:
+            self.I = np.zeros((1, int(stop_samp-start_samp)))
+            self.Q = np.zeros((1, int(stop_samp-start_samp)))
+            chan_number = np.array([chan])
+        else:
+            self.I = np.zeros((chan, int(stop_samp-start_samp)))
+            self.Q = np.zeros((chan, int(stop_samp-start_samp)))
+            chan_number = np.arange(chan)
+
+        for i in range(len(chan_number)):
+            self.I[i] = fdir.getdata("i_kid"+"%04d" % (chan_number[i],)+"_roach"+str(roach_num), \
+                                     first_sample = start_samp,num_samples=int(stop_samp-start_samp))
+            self.Q[i] = fdir.getdata("q_kid"+"%04d" % (chan_number[i],)+"_roach"+str(roach_num), \
+                                     first_sample = start_samp,num_samples=int(stop_samp-start_samp))
 
     def rotatePhase(self):
 
@@ -510,92 +580,76 @@ class kidsutils():
         return np.sqrt(self.I**2+self.Q**2)
 
     def loadBinarySweepData(self,path_to_sweep, vna = True):
-      """
-      From plotPipeline.py - Sam Gordon
-      """
-      try:
-        all_files = (os.listdir(path_to_sweep))
-        sweep_freqs = np.loadtxt(os.path.join(path_to_sweep, "sweep_freqs.dat"), dtype = "float")
-        if vna:
-          dac_freqs = np.loadtxt(os.path.join(path_to_sweep, "vna_freqs.dat"), dtype = "float")
-        else:
-          dac_freqs = np.loadtxt(os.path.join(path_to_sweep, "bb_targ_freqs.dat"), dtype = "float")
-        chan_I = np.zeros((len(sweep_freqs),len(dac_freqs)))
-        chan_Q = np.zeros((len(sweep_freqs),len(dac_freqs)))
-        bin_files = []
-        for filename in all_files:
-          if filename.endswith('0.dat'):
-            bin_files.append(os.path.join(path_to_sweep, filename))
-        bin_files = sorted(bin_files)
-        for i in range(len(sweep_freqs)):
-          name = str(int(sweep_freqs[i])) +'.dat'
-          file_path = os.path.join(path_to_sweep, name)
-          raw = open(file_path, 'rb')
-          data = np.fromfile(raw,dtype = '<f')
-          chan_I[i] = data[::2]
-          chan_Q[i] = data[1::2]
-      except ValueError:
+        """
+        From plotPipeline.py - Sam Gordon
+        """
+        try:
+            all_files = (os.listdir(path_to_sweep))
+            sweep_freqs = np.loadtxt(os.path.join(path_to_sweep, "sweep_freqs.dat"), dtype = "float")
+            if vna:
+                dac_freqs = np.loadtxt(os.path.join(path_to_sweep, "vna_freqs.dat"), dtype = "float")
+            else:
+                dac_freqs = np.loadtxt(os.path.join(path_to_sweep, "bb_targ_freqs.dat"), dtype = "float")
+            chan_I = np.zeros((len(sweep_freqs),len(dac_freqs)))
+            chan_Q = np.zeros((len(sweep_freqs),len(dac_freqs)))
+            bin_files = []
+            for filename in all_files:
+                if filename.endswith('0.dat'):
+                    bin_files.append(os.path.join(path_to_sweep, filename))
+            bin_files = sorted(bin_files)
+            for i in range(len(sweep_freqs)):
+                name = str(int(sweep_freqs[i])) +'.dat'
+            file_path = os.path.join(path_to_sweep, name)
+            raw = open(file_path, 'rb')
+            data = np.fromfile(raw,dtype = '<f')
+            chan_I[i] = data[::2]
+            chan_Q[i] = data[1::2]
+        except ValueError:
+            return chan_I, chan_Q
         return chan_I, chan_Q
-      return chan_I, chan_Q
-
-    def getTs(self,data_dir, roach_num,chan,start_samp, stop_samp):
-        fdir = gd.dirfile(data_dir)
-        I_chanN = fdir.getdata("i_kid"+"%04d" % (chan,)+"_roach"+str(roach_num),first_sample = start_samp,num_samples=(stop_samp-start_samp))
-        Q_chanN = fdir.getdata("q_kid"+"%04d" % (chan,)+"_roach"+str(roach_num),first_sample = start_samp,num_samples=(stop_samp-start_samp))
-        return I_chanN, Q_chanN
-
-    def getAllTs(self,data_dir, roach_num,num_channels,start_samp, stop_samp):
-        fdir = gd.dirfile(data_dir)
-        Iall, Qall = [], []
-        for i in range(num_channels):
-          I_chanN = fdir.getdata("i_kid"+"%04d" % (i,)+"_roach"+str(roach_num),first_sample = start_samp,num_samples=(stop_samp-start_samp))
-          Q_chanN = fdir.getdata("q_kid"+"%04d" % (i,)+"_roach"+str(roach_num),first_sample = start_samp,num_samples=(stop_samp-start_samp))
-          Iall.append(I_chanN)
-          Qall.append(Q_chanN)
-        return np.array(Iall), np.array(Qall)
 
     def get_df_gradients(self, chan, s21_f, timestream, shift_idx = 2):
-      """
-      Calculate delta f timestream and return both frequency and dissipation direction timestreams
-      """
-      delta_f = 1000.0 # Hz
-      dI, dQ = np.diff(s21_f.real[chan]), np.diff(s21_f.imag[chan])
-      dIdf, dQdf = dI/delta_f, dQ/delta_f
-      Mag = np.sqrt(s21_f.real[chan]**2+s21_f.imag[chan]**2)
-      dMag = np.sqrt(dIdf**2+dQdf**2)
-      max_idx = np.where(dMag==max(dMag))[0][0]
-      min_idx = np.where(Mag==min(Mag))[0][0]
-      I, Q = timestream.real[chan], timestream.imag[chan]
-      df_x = np.copy((I*dIdf[min_idx+shift_idx] + Q*dQdf[min_idx+shift_idx])/dMag[min_idx+shift_idx]**2)
-      df_y  = np.copy((Q*dIdf[min_idx+shift_idx] - I*dQdf[min_idx+shift_idx])/dMag[min_idx+shift_idx]**2)
-      return df_x,df_y
+        """
+        Calculate delta f timestream and return both frequency and dissipation direction timestreams
+        """
+        delta_f = 1000.0 # Hz
+        dI, dQ = np.diff(s21_f.real[chan]), np.diff(s21_f.imag[chan])
+        dIdf, dQdf = dI/delta_f, dQ/delta_f
+        Mag = np.sqrt(s21_f.real[chan]**2+s21_f.imag[chan]**2)
+        dMag = np.sqrt(dIdf**2+dQdf**2)
+        max_idx = np.where(dMag==max(dMag))[0][0]
+        min_idx = np.where(Mag==min(Mag))[0][0]
+        I, Q = timestream.real[chan], timestream.imag[chan]
+        df_x = np.copy((I*dIdf[min_idx+shift_idx] + Q*dQdf[min_idx+shift_idx])/dMag[min_idx+shift_idx]**2)
+        df_y  = np.copy((Q*dIdf[min_idx+shift_idx] - I*dQdf[min_idx+shift_idx])/dMag[min_idx+shift_idx]**2)
+        return df_x,df_y
 
     def get_all_df_gradients(self, s21_f, timestream, shift_idx = 2):
-      """
-      Calculate delta f timestream and return both frequency and dissipation direction timestreams
-      """
-      delta_f = 1000.0 # Hz
-      num_channels = len(timestream) 
-      dI, dQ = np.diff(s21_f.real), np.diff(s21_f.imag)
-      dIdf, dQdf = dI/delta_f, dQ/delta_f
-      Mag = np.sqrt(s21_f.real**2+s21_f.imag**2)
-      Mag = np.delete(Mag,len(Mag[0])-1,1)
-      dMag = np.sqrt(dIdf**2+dQdf**2)
-      # roll by shift_idx
-      dIdf, dQdf, dMag = np.roll(dIdf,-shift_idx), np.roll(dQdf,-shift_idx), np.roll(dMag,-shift_idx)
-      # Find max/min for each channel
-      min_indices, max_indices = np.zeros(num_channels).astype("int"), np.zeros(num_channels).astype("int")
-      dIdf_min, dQdf_min, dMag_min = np.zeros(len(dIdf)), np.zeros(len(dIdf)), np.zeros(len(dIdf))
-      for i in range(num_channels):
-        min_idx = np.where(Mag[i]==min(Mag[i]))[0][0]
-        min_indices[i] = min_idx
-        dIdf_min[i] = dIdf[i][min_indices[i]]
-        dQdf_min[i] = dQdf[i][min_indices[i]]
-        dMag_min[i] = dMag[i][min_indices[i]]
-      I, Q = timestream.real, timestream.imag
-      df_x = np.copy((I.T*dIdf_min + Q.T*dQdf_min)/dMag_min**2).T
-      df_y  = np.copy((Q.T*dIdf_min - I.T*dQdf_min)/dMag_min**2).T
-      return df_x, df_y 
+        """
+        Calculate delta f timestream and return both frequency and dissipation direction timestreams
+        """
+        delta_f = 1000.0 # Hz
+        num_channels = len(timestream) 
+        dI, dQ = np.diff(s21_f.real), np.diff(s21_f.imag)
+        dIdf, dQdf = dI/delta_f, dQ/delta_f
+        Mag = np.sqrt(s21_f.real**2+s21_f.imag**2)
+        Mag = np.delete(Mag,len(Mag[0])-1,1)
+        dMag = np.sqrt(dIdf**2+dQdf**2)
+        # roll by shift_idx
+        dIdf, dQdf, dMag = np.roll(dIdf,-shift_idx), np.roll(dQdf,-shift_idx), np.roll(dMag,-shift_idx)
+        # Find max/min for each channel
+        min_indices, max_indices = np.zeros(num_channels).astype("int"), np.zeros(num_channels).astype("int")
+        dIdf_min, dQdf_min, dMag_min = np.zeros(len(dIdf)), np.zeros(len(dIdf)), np.zeros(len(dIdf))
+        for i in range(num_channels):
+            min_idx = np.where(Mag[i]==min(Mag[i]))[0][0]
+            min_indices[i] = min_idx
+            dIdf_min[i] = dIdf[i][min_indices[i]]
+            dQdf_min[i] = dQdf[i][min_indices[i]]
+            dMag_min[i] = dMag[i][min_indices[i]]
+        I, Q = timestream.real, timestream.imag
+        df_x = np.copy((I.T*dIdf_min + Q.T*dQdf_min)/dMag_min**2).T
+        df_y  = np.copy((Q.T*dIdf_min - I.T*dQdf_min)/dMag_min**2).T
+        return df_x, df_y 
 
     def despike_targs(self, I_targ, Q_targ,std=5,W=0.1):
         I_targ_ds,Q_targ_ds = [],[] 
@@ -605,8 +659,12 @@ class kidsutils():
             I, Q = I[I_idx],Q[I_idx]
             Q_idx = self.removeStd(Q,s=std)
             I, Q = I[Q_idx],Q[Q_idx]
-            I_ds_f = self.butter(I,N=4,Wn=W,typ="low") 
-            Q_ds_f = self.butter(Q,N=4,Wn=W,typ="low")
+
+            I_filt = filterdata(I, W)
+            Q_filt = filterdata(Q, W)
+
+            I_ds_f = I_filt.butter_filter_data(order=4, filter_type="highpass") 
+            Q_ds_f = Q_filt.butter_filter_data(order=4, filter_type="highpass")
             Q_targ_ds.append(Q_ds_f)
             I_targ_ds.append(I_ds_f)
         return np.array(I_targ_ds), np.array(Q_targ_ds)
