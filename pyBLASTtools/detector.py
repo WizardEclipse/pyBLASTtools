@@ -566,7 +566,10 @@ class kidsutils:
         else:
             self.I = np.zeros((chan, int(stop_samp-start_samp)))
             self.Q = np.zeros((chan, int(stop_samp-start_samp)))
-            chan_number = np.arange(chan)
+            if isinstance(chan, float) or isinstance(chan, int):
+                chan_number = np.arange(chan)
+            else:
+                chan_number = chan
 
         for i in range(len(chan_number)):
             self.I[i] = fdir.getdata("i_kid"+"%04d" % (chan_number[i],)+"_roach"+str(roach_num), \
@@ -617,7 +620,7 @@ class kidsutils:
         From plotPipeline.py - Sam Gordon
         '''
         try:
-            all_files = (os.listdir(path_to_sweep))
+
             sweep_freqs = np.loadtxt(os.path.join(path_to_sweep, "sweep_freqs.dat"), dtype = "float")
             if vna:
                 dac_freqs = np.loadtxt(os.path.join(path_to_sweep, "vna_freqs.dat"), dtype = "float")
@@ -625,18 +628,14 @@ class kidsutils:
                 dac_freqs = np.loadtxt(os.path.join(path_to_sweep, "bb_targ_freqs.dat"), dtype = "float")
             chan_I = np.zeros((len(sweep_freqs),len(dac_freqs)))
             chan_Q = np.zeros((len(sweep_freqs),len(dac_freqs)))
-            bin_files = []
-            for filename in all_files:
-                if filename.endswith('0.dat'):
-                    bin_files.append(os.path.join(path_to_sweep, filename))
-            bin_files = sorted(bin_files)
+
             for i in range(len(sweep_freqs)):
                 name = str(int(sweep_freqs[i])) +'.dat'
-            file_path = os.path.join(path_to_sweep, name)
-            raw = open(file_path, 'rb')
-            data = np.fromfile(raw,dtype = '<f')
-            chan_I[i] = data[::2]
-            chan_Q[i] = data[1::2]
+                file_path = os.path.join(path_to_sweep, name)
+                raw = open(file_path, 'rb')
+                data = np.fromfile(raw,dtype = '<f')
+                chan_I[i] = data[::2]
+                chan_Q[i] = data[1::2]
         except ValueError:
             return chan_I, chan_Q
         return chan_I, chan_Q
@@ -666,13 +665,28 @@ class kidsutils:
             s21_f = kwargs.get('s21_f')
             s21_f_real, s21_f_imag = s21_f.real, s21_f.imag
         else:
-            s21_f_real, s21_f_imag = self.loadBinarySweepData(path_to_sweep, vna)
-            despike = kwargs.get('despike', True)
-            
-            if despike:
-                std = kwargs.get('std', 5)
+            s21_f_real_temp, s21_f_imag_temp = self.loadBinarySweepData(path_to_sweep, vna)
+
+            filtering = kwargs.get('filtering', True)
+
+            if filtering:
                 cutoff = kwargs.get('cutoff', 0.1)
-                s21_f_real, s21_f_imag = self.despike_sweeps(s21_f_real, s21_f_imag, std=std, cutoff=cutoff)
+                
+                s21_f_real = np.zeros_like(s21_f_real_temp.T)
+                s21_f_imag = np.zeros_like(s21_f_imag_temp.T)
+
+                for i in range(len(s21_f_real.T)):
+                    s21_real_filt = filterdata(s21_f_real_temp.T[i], cutoff)
+                    s21_imag_filt = filterdata(s21_f_imag_temp.T[i], cutoff)
+
+                    s21_f_real[i] = s21_real_filt.butter_filter_data(order=4, filter_type="highpass") 
+                    s21_f_imag[i] = s21_imag_filt.butter_filter_data(order=4, filter_type="highpass")
+            
+            else:
+
+                s21_f_real = s21_f_real_temp.T
+                s21_f_imag = s21_f_imag_temp.T
+
 
         try: 
             single_chan = self.single
@@ -702,6 +716,7 @@ class kidsutils:
         dIdf, dQdf = dI/delta_f, dQ/delta_f        
         dMag = np.sqrt(dIdf**2+dQdf**2)
         
+
         dIdf, dQdf, dMag = np.roll(dIdf,-shift_idx, axis=1), np.roll(dQdf,-shift_idx, axis=1), \
                            np.roll(dMag,-shift_idx, axis=1)
 

@@ -27,18 +27,19 @@ flight_chop_ts = flight_chop_ts.astype("str")
 
 ##################################3###############
 # Change hard drive path
-hard_drive_path = "/media/adrian/blast2020fc1/"
+hard_drive_path = '/media/gabriele/mac/'
 ##################################################
 det = pbt.detector.kidsutils()
 
 channel_number = 40
 # get timestreams for all channels, start_samp and stop_samp are roach indices.
-I_chan, Q_chan = det.getAllTs(hard_drive_path + flight_chop_ts[roach_num-1],roach_num,float_chans,start_samp = 32780000, stop_samp=32780000+4869)
-Z = I_chan + 1j*Q_chan
+# I_chan, Q_chan = det.getAllTs(hard_drive_path + flight_chop_ts[roach_num-1],roach_num,float_chans,start_samp = 32780000, stop_samp=32780000+4869)
+# Z = I_chan + 1j*Q_chan
 # get target sweep for all channels
 s21_real, s21_imag = det.loadBinarySweepData(hard_drive_path + flight_targ[roach_num-1],vna=False)
 s21_real_f, s21_imag_f = det.despike_targs(s21_real.T, s21_imag.T)
 s21_f = s21_real_f + 1j*s21_imag_f
+sys.exit()
 # get df's
 df_x_all, df_y_all = det.get_all_df_gradients( s21_f, Z, 2)
 f, (ax1, ax2) = plt.subplots(2, 1, sharex=True)

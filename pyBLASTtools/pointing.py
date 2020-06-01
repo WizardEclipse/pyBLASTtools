@@ -6,6 +6,7 @@ from astropy.coordinates import EarthLocation, AltAz, FK5, ICRS, SkyCoord
 from astropy.time import Time, core
 
 import pyBLASTtools.quaternion as quat
+import pyBLASTtools.beam as beam
 
 class utils(object):
 
@@ -209,175 +210,53 @@ class convert_to_telescope():
 
         return np.degrees(x_tel), np.degrees(y_tel)
 
-class apply_offset(object):
+class offset:
 
-    '''
-    Class to apply the offset to different coordinates
-    '''
-
-    def __init__(self, coord1, coord2, ctype, xsc_offset, det_offset = np.array([0.,0.]),\
-                 lst = None, lat = None):
-
-        self.coord1 = coord1                    #Array of coordinate 1
-        self.coord2 = coord2                    #Array of coordinate 2
-        self.ctype = ctype                      #Ctype of the map
-        self.xsc_offset = xsc_offset            #Offset with respect to star cameras in xEL and EL
-        self.det_offset = det_offset            #Offset with respect to the central detector in xEL and EL
-        self.lst = lst                          #Local Sideral Time array
-        self.lat = lat                          #Latitude array
-
-    def correction(self):
-
-        if self.ctype.lower() == 'ra and dec':
-
-            conv2azel = utils(self.coord1, self.coord2, self.lst, self.lat)
-
-            az, el = conv2azel.radec2azel()
-
-            xEL = np.degrees(np.radians(az)*np.cos(np.radians(el)))
-            
-            ra_corrected = np.zeros((int(np.size(self.det_offset)/2), len(az)))
-            dec_corrected = np.zeros((int(np.size(self.det_offset)/2), len(az)))
-
-            for i in range(int(np.size(self.det_offset)/2)):
-                
-                quaternion = quat.quaternions()
-                xsc_quat = quaternion.eul2quat(self.xsc_offset[0], self.xsc_offset[1], 0)
-                det_quat = quaternion.eul2quat(self.det_offset[i,0], self.det_offset[i,1], 0)
-                off_quat = quaternion.product(det_quat, xsc_quat)
-
-                xEL_offset, EL_offset, roll_offset = quaternion.quat2eul(off_quat)
-
-                # Verify if the signs are still the same as BLASTPol
-                xEL_corrected_temp = xEL-xEL_offset
-                EL_corrected_temp = el+EL_offset
-                AZ_corrected_temp = np.degrees(np.radians(xEL_corrected_temp)/np.cos(np.radians(el)))
-
-                conv2radec = utils(AZ_corrected_temp, EL_corrected_temp, \
-                                   self.lst, self.lat)
-
-                ra_corrected[i,:], dec_corrected[i,:] = conv2radec.azel2radec()
-
-            del xEL_corrected_temp
-            del EL_corrected_temp
-            del AZ_corrected_temp
-            gc.collect()
-
-            return ra_corrected, dec_corrected
-
-        elif self.ctype.lower() == 'az and el':
-
-            el_corrected = np.zeros((int(np.size(self.det_offset)/2), len(self.coord1)))
-            az_corrected = np.zeros((int(np.size(self.det_offset)/2), len(self.coord2)))
-
-            for i in range(int(np.size(self.det_offset)/2)):
-            
-                el_corrected[i, :] = self.coord2+self.xsc_offset[1]+self.det_offset[i, 1]
-
-                az_corrected[i, :] = (self.coord1*np.cos(self.coord2)-self.xsc_offset[i]-\
-                                      self.det_offset[i, 0])/np.cos(el_corrected)
-
-            return az_corrected, el_corrected
-
-        else:
-
-            el_corrected = np.zeros((int(np.size(self.det_offset)/2), len(self.coord1)))
-            xel_corrected = np.zeros((int(np.size(self.det_offset)/2), len(self.coord2)))
-
-            for i in range(int(np.size(self.det_offset)/2)):
-
-                xel_corrected[i, :] = self.coord1-self.xsc_offset[0]-self.det_offset[i, 0]
-                el_corrected[i, :] = self.coord2+self.xsc_offset[1]+self.det_offset[i, 1]
-
-
-            return xel_corrected,el_corrected
-
-class compute_offset(object):
-
-    def __init__(self, coord1_ref, coord2_ref, map_data, \
-                 pixel1_coord, pixel2_coord, wcs_trans, ctype, \
-                 lst, lat):
-
-        self.coord1_ref = coord1_ref           #Reference value of the map along the x axis in RA and DEC
-        self.coord2_ref = coord2_ref           #Reference value of the map along the y axis in RA and DEC
-        self.map_data = map_data               #Maps 
-        self.pixel1_coord = pixel1_coord       #Array of the coordinates converted in pixel along the x axis
-        self.pixel2_coord = pixel2_coord       #Array of the coordinates converted in pixel along the y axis
-        self.wcs_trans = wcs_trans             #WCS transformation 
-        self.ctype = ctype                     #Ctype of the map
-        self.lst = lst                         #Local Sideral Time
-        self.lat = lat                         #Latitude
-
-    def centroid(self, threshold=0.275):
+    def __init__(self, proj):
 
         '''
-        For more information about centroid calculation see Shariff, PhD Thesis, 2016
+        Class to handle pointing offsets. 
         '''
 
-        maxval = np.max(self.map_data)
+        self.proj = proj    
 
-        y_max, x_max = np.where(self.map_data == maxval)
 
-        gt_inds = np.where(self.map_data > threshold*maxval)
+    def compute_offset(self, mp, pixel_coord, threshold=0.5, ref_point=None):
 
-        weight = np.zeros((self.map_data.shape[0], self.map_data.shape[1]))
-        weight[gt_inds] = 1.
-        a = self.map_data[gt_inds]
-        flux = np.sum(a)
+        '''
+        Function to compute the offset of a particular detector. 
+        Parameters:
+        - mp: Map to be used for computing the offset 
+        - pixel_coord: list with the pixel coordinate of the map 
+        - threshold: threshold for the the determination of the centroid
+        - ref_point: reference point to compute the offset. If none the crval of the 
+                     map projection is used
+        '''
 
-        x_coord_max = np.floor(np.amax(self.pixel1_coord))+1
-        x_coord_min = np.floor(np.amin(self.pixel1_coord))
+        xc, yc = beam.centroid(mp, pixel_coord[0], pixel_coord[1], threshold=threshold)
+        centroid_x, centroid_y = self.proj.all_pix2world(xc, yc, 1)
 
-        x_arr = np.arange(x_coord_min, x_coord_max)
+        if ref_point is None:
+            ref_point = self.proj.wcs.crval
 
-        y_coord_max = np.floor(np.amax(self.pixel2_coord))+1
-        y_coord_min = np.floor(np.amin(self.pixel2_coord))
-
-        y_arr = np.arange(y_coord_min, y_coord_max)
-
-        xx, yy = np.meshgrid(x_arr, y_arr)
         
-        x_c = np.sum(xx*weight*self.map_data)/flux
-        y_c = np.sum(yy*weight*self.map_data)/flux
+        return np.array([xc, yc]), np.array([centroid_x-ref_point[0], centroid_y-ref_point[1]])
 
-        return x_c, y_c
-    
-    def value(self):
+    def apply_offset(self, coord1, coord2, offset_val):
+        
+        key = list(offset_val.keys())[0]
+        offset_x = np.zeros(len(offset_val[key][0]))
+        offset_y = np.zeros(len(offset_val[key][0]))
 
-        #Centroid of the map
-        x_c, y_c = self.centroid()
-               
-        if self.ctype.lower() == 'ra and dec':
-            map_center = wcs.utils.pixel_to_skycoord(np.rint(x_c), np.rint(y_c), self.wcs_trans)
-            
-            x_map = map_center.ra.hour
-            y_map = map_center.dec.degree
+        for key in offset_val.keys():
+            offset_x += offset_val[key][0]
+            offset_y += offset_val[key][1]
 
-            centroid_conv = utils(x_map, y_map, np.average(self.lst), np.average(self.lat))
 
-            coord1_reference = self.coord1_ref/15.
+        coord1 = (coord1.T+offset_x).T
+        coord2 = (coord2.T+offset_y).T
 
-            az_centr, el_centr = centroid_conv.radec2azel()
-            xel_centr = az_centr*np.cos(np.radians(el_centr))
-
-        else:
-            map_center = self.wcs_trans.wcs_pix2world(x_c, y_c, 1)
-            coord1_reference = self.coord1_ref
-            el_centr = y_map
-            if self.cytpe.lower() == 'xel and el':
-                xel_centr = x_map            
-            else:
-                xel_centr = x_map/np.cos(np.radians(el_centr))
-            
-
-        ref_conv = utils(coord1_reference, self.coord2_ref, np.average(self.lst), \
-                         np.average(self.lat))
-
-        az_ref, el_ref = ref_conv.radec2azel()
-
-        xel_ref = az_ref*np.cos(np.radians(el_ref))
-
-        return xel_centr-xel_ref, el_ref+el_centr
+        return coord1, coord2
 
 
         

@@ -4,6 +4,7 @@ from itertools import compress
 import matplotlib.pyplot as plt
 import numpy as np
 import os
+from astropy.table import Table
 
 path = '/media/gabriele/mac'
 
@@ -14,7 +15,7 @@ master_file = master_file[0]
 roach_file = list(compress(list_file, ['roach' in s for s in list_file]))
 
 ### Detector Parameters ###
-roach_number = 1
+roach_number = 3
 detector_number = 2
 
 ### Scan Parameters ###
@@ -60,6 +61,14 @@ pa = d.interpolate(master_array=pa, fs_master=100)
 t = pbt.pointing.convert_to_telescope(ra, dec, pa=pa)
 radec = t.conversion()
 
+ctype = 'RA and DEC'
+crpix = np.array([50.,50.])
+crval = np.array([np.median(radec[0]), np.median(radec[1])])
+pixel_size = np.array([35./3600., 35./3600.])
+
+wcs = pbt.mapmaker.wcs_world(crpix=crpix, cdelt=pixel_size, crval=crval, telcoord=True)
+proj = wcs.w.deepcopy()
+
 det = pbt.detector.kidsutils(data_dir=roach_file[int(roach_number-1)], roach_num=int(roach_number), \
                              single=False, chan=int(detector_number), first_sample=d.idx_start_roach, \
                              last_sample=d.idx_end_roach)
@@ -70,12 +79,23 @@ flight_targ = flight_targ.astype("str")
 
 df_x, df_y = det.get_df(path_to_sweep=path+'/'+flight_targ[roach_number-1])
 
-sys.exit()
+df_x = (df_x.T-np.mean(df_x, axis=1)).T
+
+t = Table.read('det_table.txt', format='ascii')
+
+off = {}
+
+if np.shape(df_x)[0] != 1:
+    df_x = (df_x.T*np.array(t['resp'][:detector_number])).T
+    off['total'] = [np.array(t['yaw_off'][:detector_number]), np.array(t['pitch_off'][:detector_number])]
+else:
+    df_x = df_x*np.array(t['resp'][detector_number])
+    off['total'] = [np.array(t['yaw_off'][detector_number]), np.array(t['pitch_off'][detector_number])]
 
 # phase = det.phase
 
-# mask = np.zeros_like(phase[0], dtype=bool)
-# mask[idx_mask_start:idx_mask_end] = True
+mask = np.zeros_like(df_x[0], dtype=bool)
+mask[idx_mask_start:idx_mask_end] = True
 
 # phase = np.ma.array(phase, mask=np.tile(mask, (np.shape(phase)[0], 1)))
 
@@ -83,23 +103,21 @@ sys.exit()
 # phase_detrend, baseline = phase_trend.fit_residual(baseline=True, return_baseline=True, \
 #                                                    baseline_type='poly', order=8, tol=5e-4)
 
-# final_ra = radec[0][:,~mask]
-# final_dec = radec[1][:,~mask]
-# final_det = phase_detrend.data[:,~mask]
+final_ra = radec[0][:,~mask]
+final_dec = radec[1][:,~mask]
+final_det = df_x[:,~mask]
 
-ctype = 'RA and DEC'
-crpix = np.array([50.,50.])
-crval = np.array([np.median(radec[0]), np.median(radec[1])])
-pixel_size = np.array([35./3600., 35./3600.])
+#Apply offset 
+offsets = pbt.pointing.offset(proj)
+final_ra, final_dec = offsets.apply_offset(final_ra, final_dec, off)
 
-wcs = pbt.mapmaker.wcs_world(crpix=crpix, cdelt=pixel_size, crval=crval, telcoord=True)
+
 wcs.wcs_proj(final_ra, final_dec, np.shape(final_det)[0])
-
-proj = wcs.w.copy()
 w = wcs.pixel.copy()
 
-maps=pbt.mapmaker.mapmaking(final_det, 1., np.zeros(len(phase_detrend)), w, crpix)
+maps=pbt.mapmaker.mapmaking(final_det, 1., np.zeros(len(df_x)), w, crpix)
 
 maps = maps.binning_map(coadd=True)
 
-print(maps['I'])
+plt.imshow(maps['I'])
+plt.show()
