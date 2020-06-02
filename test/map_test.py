@@ -16,7 +16,7 @@ roach_file = list(compress(list_file, ['roach' in s for s in list_file]))
 
 ### Detector Parameters ###
 roach_number = 3
-detector_number = 2
+detector_number = np.arange(0,668, 1, dtype=int)
 
 ### Scan Parameters ###
 time_start = 1578323354+60*4.2
@@ -70,7 +70,7 @@ wcs = pbt.mapmaker.wcs_world(crpix=crpix, cdelt=pixel_size, crval=crval, telcoor
 proj = wcs.w.deepcopy()
 
 det = pbt.detector.kidsutils(data_dir=roach_file[int(roach_number-1)], roach_num=int(roach_number), \
-                             single=False, chan=int(detector_number), first_sample=d.idx_start_roach, \
+                             single=False, chan=detector_number, first_sample=d.idx_start_roach, \
                              last_sample=d.idx_end_roach)
 
 path_file = os.path.dirname(os.path.abspath(__file__))
@@ -85,14 +85,10 @@ t = Table.read('det_table.txt', format='ascii')
 
 off = {}
 
-if np.shape(df_x)[0] != 1:
-    df_x = (df_x.T*np.array(t['resp'][:detector_number])).T
-    off['total'] = [np.array(t['yaw_off'][:detector_number]), np.array(t['pitch_off'][:detector_number])]
-else:
-    df_x = df_x*np.array(t['resp'][detector_number])
-    off['total'] = [np.array(t['yaw_off'][detector_number]), np.array(t['pitch_off'][detector_number])]
+df_x = (df_x.T*np.array(t['resp'][detector_number])).T
+off['total'] = [np.array(t['yaw_off'][detector_number]), np.array(t['pitch_off'][detector_number])]
 
-# phase = det.phase
+phase = det.KIDphase()
 
 mask = np.zeros_like(df_x[0], dtype=bool)
 mask[idx_mask_start:idx_mask_end] = True
@@ -108,8 +104,8 @@ final_dec = radec[1][:,~mask]
 final_det = df_x[:,~mask]
 
 #Apply offset 
-offsets = pbt.pointing.offset(proj)
-final_ra, final_dec = offsets.apply_offset(final_ra, final_dec, off)
+# offsets = pbt.pointing.offset(proj)
+# final_ra, final_dec = offsets.apply_offset(final_ra, final_dec, off)
 
 
 wcs.wcs_proj(final_ra, final_dec, np.shape(final_det)[0])
@@ -117,7 +113,24 @@ w = wcs.pixel.copy()
 
 maps=pbt.mapmaker.mapmaking(final_det, 1., np.zeros(len(df_x)), w, crpix)
 
-maps = maps.binning_map(coadd=True)
+maps = maps.binning_map(coadd=False)
 
-plt.imshow(maps['I'])
-plt.show()
+key = maps['I'].keys()
+count = 0
+c_x = np.zeros(len(detector_number))
+c_y = np.zeros(len(detector_number))
+for k in key:
+    xc, yc = pbt.beam.centroid(maps['I'][k], w[:,:,0], w[:,:,1], threshold=0.5)
+    c_x[count], c_y[count] = proj.all_pix2world(xc, yc, 1)
+    count += 1
+
+idx, = np.where(c_x != 0)
+
+x1 = c_x[idx]
+y1 = c_y[idx]
+
+idx_x, = np.where(x1>np.amax(radec[0]))
+x1[idx_x] -= 360.
+
+np.savetxt('centroid_350.txt', np.c_[idx,x1,y1])
+

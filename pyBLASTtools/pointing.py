@@ -253,8 +253,8 @@ class offset:
             offset_y += offset_val[key][1]
 
 
-        coord1 = (coord1.T+offset_x).T
-        coord2 = (coord2.T+offset_y).T
+        coord1 = (coord1.T-offset_x).T
+        coord2 = (coord2.T-offset_y).T
 
         return coord1, coord2
 

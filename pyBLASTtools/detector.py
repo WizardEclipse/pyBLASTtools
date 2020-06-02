@@ -528,18 +528,11 @@ class kidsutils:
 
         self.Z = None 
 
-        self.phase = None
-        self.mag = None
-
         if self.I is not None and self.Q is not None:
 
             ### Complex Timestream ###
             self.Z = self.I + 1j*self.Q 
-
-            self.phase = self.KIDphase()
-            self.mag = self.KIDmag()
-        
-    
+            
     def getTs(self, data_dir, roach_num, single, chan, start_samp, stop_samp):
 
         '''
@@ -564,12 +557,13 @@ class kidsutils:
             self.Q = np.zeros((1, int(stop_samp-start_samp)))
             chan_number = np.array([chan])
         else:
-            self.I = np.zeros((chan, int(stop_samp-start_samp)))
-            self.Q = np.zeros((chan, int(stop_samp-start_samp)))
             if isinstance(chan, float) or isinstance(chan, int):
                 chan_number = np.arange(chan)
             else:
                 chan_number = chan
+            
+            self.I = np.zeros((len(chan_number), int(stop_samp-start_samp)))
+            self.Q = np.zeros((len(chan_number), int(stop_samp-start_samp)))
 
         for i in range(len(chan_number)):
             self.I[i] = fdir.getdata("i_kid"+"%04d" % (chan_number[i],)+"_roach"+str(roach_num), \
@@ -679,9 +673,11 @@ class kidsutils:
                     s21_real_filt = filterdata(s21_f_real_temp.T[i], cutoff)
                     s21_imag_filt = filterdata(s21_f_imag_temp.T[i], cutoff)
 
-                    s21_f_real[i] = s21_real_filt.butter_filter_data(order=4, filter_type="highpass") 
-                    s21_f_imag[i] = s21_imag_filt.butter_filter_data(order=4, filter_type="highpass")
-            
+                    s21_f_real[i] = s21_real_filt.butter_filter_data(order=4, filter_type="lowpass") 
+                    s21_f_imag[i] = s21_imag_filt.butter_filter_data(order=4, filter_type="lowpass")
+
+                del s21_f_real_temp
+                del s21_f_imag_temp
             else:
 
                 s21_f_real = s21_f_real_temp.T
@@ -705,13 +701,18 @@ class kidsutils:
 
         if timestream is None:
             timestream = self.Z
-
+        
         if single_chan:
             dI, dQ = np.array([np.diff(s21_f_real[channel])]), np.array([np.diff(s21_f_imag[channel])])
             Mag = np.array([np.sqrt(s21_f_real[channel]**2+s21_f_imag[channel]**2)])
         else:
-            dI, dQ = np.diff(s21_f_real[:channel]), np.diff(s21_f_imag[:channel])
-            Mag = np.sqrt(s21_f_real[:channel]**2+s21_f_imag[:channel]**2)
+            if isinstance(channel, int) or isinstance(channel, float):
+                channel = int(channel)
+            else:
+                channel = channel
+
+            dI, dQ = np.diff(s21_f_real[channel]), np.diff(s21_f_imag[channel])
+            Mag = np.sqrt(s21_f_real[channel]**2+s21_f_imag[channel]**2)
 
         dIdf, dQdf = dI/delta_f, dQ/delta_f        
         dMag = np.sqrt(dIdf**2+dQdf**2)
@@ -732,6 +733,10 @@ class kidsutils:
         
         df_x = np.copy((timestream.real.T*dIdf_min + timestream.imag.T*dQdf_min)/dMag_min**2).T
         df_y  = np.copy((timestream.imag.T*dIdf_min - timestream.real.T*dQdf_min)/dMag_min**2).T
+
+        del dI
+        del dQ
+        del Mag
         
         return df_x, df_y
 

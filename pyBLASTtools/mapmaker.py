@@ -63,12 +63,12 @@ class wcs_world():
                 coord = np.transpose(np.array([coord1[i], coord2[i]]))
             except IndexError:
                 coord = np.transpose(np.array([coord1[0], coord2[0]]))
-            self.pixel[i,:,:] = (np.floor(self.world2pix(coord))).astype(int)
+            self.pixel[i,:,:] = (np.rint(self.world2pix(coord))).astype(int)
 
     def reproject(self, world_original):
 
-        x_min_map = np.floor(np.amin(world_original[:,:,0]))
-        y_min_map = np.floor(np.amin(world_original[:,:,1]))
+        x_min_map = np.rint(np.amin(world_original[:,:,0]))
+        y_min_map = np.rint(np.amin(world_original[:,:,1]))
 
         new_proj = self.w.deepcopy()
 
@@ -85,13 +85,18 @@ class mapmaking(object):
     check Moncelsi et al. 2012
     '''
 
-    def __init__(self, data, weight, polangle, pixelmap, crpix, Ionly=True, number=1, \
+    def __init__(self, data, weight, polangle, pixelmap, crpix, det_idx=None, Ionly=True, number=1, \
                  convolution=False, std=0., cdelt=0.):
 
         self.data = data                     #detector TOD
         self.sigma = 1/weight**2             #weights associated with the detector values
         self.polangle = polangle             #polarization angles of each detector
-        self.pixelmap = pixelmap             #Coordinates of each point in the TOD in pixel coordinates
+        self.pixelmap = pixelmap.copy()      #Coordinates of each point in the TOD in pixel coordinates
+
+        if det_idx is None:
+            det_idx = np.arange(np.shape(self.data)[0])
+
+        self.det_idx = det_idx               #Detector index, used for not coadded map to label the dictionary 
 
         self.Ionly = Ionly                   #Choose if a map only in Intensity
         self.convolution = convolution       #If true a map is convolved with a gaussian
@@ -265,23 +270,23 @@ class mapmaking(object):
                 
                 if self.mpi_implementation:
                     temp = {}
-                    temp['det_'+str(int(i))] = Imap
+                    temp['det_'+str(int(self.det_idx[i]))] = Imap
                     I_mpi.append(temp)
 
                     if not self.Ionly:
                         temp = {}
-                        temp['det_'+str(int(i))] = Qmap
+                        temp['det_'+str(int(self.det_idx[i]))] = Qmap
                         Q_mpi.append(temp)
 
                         temp = {}
-                        temp['det_'+str(int(i))] = Umap
+                        temp['det_'+str(int(self.det_idx[i]))] = Umap
                         U_mpi.append(temp)
 
                 else:
-                    maps['I']['det_'+str(int(i))] = Imap
+                    maps['I']['det_'+str(int(self.det_idx[i]))] = Imap
                     if not self.Ionly:
-                        maps['Q']['det_'+str(int(i))] = Qmap
-                        maps['U']['det_'+str(int(i))] = Umap
+                        maps['Q']['det_'+str(int(self.det_idx[i]))] = Qmap
+                        maps['U']['det_'+str(int(self.det_idx[i]))] = Umap
 
         if coadd:
             if self.mpi_implementation:
