@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.linalg import svd
 from scipy.optimize import least_squares
-from photutils import find_peaks
+#from photutils import find_peaks
 from astropy.stats import sigma_clipped_stats
 
 def centroid(map_data, pixel1_coord, pixel2_coord, threshold=0.275):
@@ -91,11 +91,11 @@ class beam(object):
         mean, median, std = sigma_clipped_stats(self.data, sigma=3.0)
         threshold = median+(5.*std)
         if mask_pf is False:
-            tbl = find_peaks(map_data, threshold, box_size=bs)
+            #tbl = find_peaks(map_data, threshold, box_size=bs)
             mask_pf = np.zeros_like(self.xy_mesh[0])
         else:
             self.mask = mask_pf.copy()
-            tbl = find_peaks(map_data, threshold, box_size=bs, mask = self.mask)
+            #tbl = find_peaks(map_data, threshold, box_size=bs, mask = self.mask)
         tbl['peak_value'].info.format = '%.8g'
 
         guess = np.array([])
