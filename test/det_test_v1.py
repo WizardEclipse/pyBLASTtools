@@ -36,10 +36,15 @@ channel_number = 40
 I_chan, Q_chan = det.getAllTs(hard_drive_path + flight_chop_ts[roach_num-1],roach_num,float_chans,start_samp = 32780000, stop_samp=32780000+4869)
 Z = I_chan + 1j*Q_chan
 
+#phase = np.arctan2(Z.imag[channel_number], Z.real[channel_number])
+
+#plt.figure()
+#plt.plot(phase)
+#plt.show()
 
 # get target sweep for all channels
 s21_real, s21_imag = det.loadBinarySweepData(hard_drive_path + flight_targ[roach_num-1],vna=False)
-s21_real_f, s21_imag_f = det.filter_targs(s21_real.T, s21_imag.T)
+#s21_real_f, s21_imag_f = det.filter_targs(s21_real.T, s21_imag.T)
 s21_f = s21_real_f + 1j*s21_imag_f
 # get df's
 print("Calculating delta f..")
