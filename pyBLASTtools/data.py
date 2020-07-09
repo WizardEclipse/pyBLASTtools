@@ -16,28 +16,41 @@ class InputError(Error):
 
 class data:
 
-    def __init__(self, path, idx_start, idx_end, field_list, mode='frames', ref_field=None):
+    def __init__(self, path, idx_start, idx_end, field_list=[], mode='frames', ref_field=None, \
+                 roach=False, roach_num=None):
 
         '''
         Class to handle dirfile: load, select a subsample or save data
         Parameters:
         - path: path of the dirfile
-        - idx_start: first frame or sample of the subset.
-        - idx_end: last frame or sample of the subset. For the last sample of the 
+        - idx_start: first frame or sample or starting time of the subset.
+        - idx_end: last frame or sample or final time of the subset. For the last sample of the 
                    array, it is possible to use -1
         - field_list: a list of strings with the field to be loaded. If full all the 
                       fields in the dirfile are read
-        - mode: can be frames or samples. If frames, idx_start(_end) are read as 
+        - mode: can be frames, samples or time. If frames, idx_start(_end) are read as 
                 as first and last frame of interest. If samples, the parameters idx_start(_end)
-                refers to the a field given by the parameter ref_field. 
+                refers to the a field given by the parameter ref_field. If time the parameters idx_start(_end)
+                refers to the starting and ending time of the slice of interest.
+                BE CAREFUL: reading data in time with this class does not synchronize pointing and detector
+                data. In order to do that, it is necessary to use the interpolation function in timing.py
         - ref_field: reference field for the mode 'samples' to assign the idx_start(_end). 
                      If None, the reference field is considered the ctime
+        - roach: If true, the dirfile to be read is the roach file and not the master. Default is FALSE
+        - roach_num: the number of the roach if a roach dirfile is used. Default is 3 (350um array)
         '''
 
         self.d = gd.dirfile(path)
 
+        if roach:
+            if roach_num is None:
+                roach_num = 3
+            time_field = 'ctime_built_roach'+str(int(roach_num))
+        else:
+            time_field = 'ctime_master_built'
+
         if ref_field is None:
-            self.ref_field = 'ctime_master_built'
+            self.ref_field = time_field
         else:
             self.ref_field = ref_field
 
@@ -47,42 +60,56 @@ class data:
 
             first_frame = int(idx_start)
             num_frames = int(idx_end)-int(idx_start)
+
+            self.time = self.d.getdata(time_field, first_frame=first_frame, num_frames=num_frames)
+
         else:
-            if idx_end == -1:
-                if field_list == 'full':                  
-                    idx_end = self.d.array_len('ctime_master_built')
-                else:
-                    idx_end = self.d.array_len(self.ref_field)
-        
-        self.resample_completed = False
-        self.data_values = {}
+            self.time = self.d.getdata(time_field)
 
-        if field_list == 'full':
-            field_list = self.d.field_list()
+            if mode == 'time':
+                idx_start = np.nanargmin(np.abs(self.time-idx_start))
+                idx_end = np.nanargmin(np.abs(self.time-idx_end))
 
-        len_fields = np.array([])
-
-        for i in field_list:
-            if mode == 'frames':
-                self.data_values[i] = self.d.getdata(i, first_frame=first_frame, num_frames=num_frames)
             else:
-                first_sample = int(idx_start*self.d.spf(i)/self.d.spf(self.ref_field))
-                num_samples = int((idx_end-idx_start)*self.d.spf(i)/self.d.spf(self.ref_field))
+                if idx_end == -1:
+                    if field_list == 'full':                  
+                        idx_end = self.d.array_len(time_field)
+                    else:
+                        idx_end = self.d.array_len(self.ref_field)
 
-                self.data_values[i] = self.d.getdata(i, first_sample=first_sample, num_samples=num_samples)
+            self.time = self.time[idx_start:idx_end]
 
-            len_fields = np.append(len_fields, len(self.data_values[i]))
+        if len(field_list) != 0:
+        
+            self.resample_completed = False
+            self.data_values = {}
 
-        if self.ref_field in field_list:
-            self.ref_field_array = self.data_values[self.ref_field]
-        else:
-            self.ref_field_array = self.d.getdata(self.ref_field, first_sample=int(idx_start), \
-                                                  num_samples=int(idx_end-idx_start))
+            if field_list == 'full':
+                field_list = self.d.field_list()
 
-        if np.all(np.diff(len_fields) == 0):
-            self.resample_required = False
-        else:
-            self.resample_required = True
+            len_fields = np.array([])
+
+            for i in field_list:
+                if mode == 'frames':
+                    self.data_values[i] = self.d.getdata(i, first_frame=first_frame, num_frames=num_frames)
+                else:
+                    first_sample = int(idx_start*self.d.spf(i)/self.d.spf(self.ref_field))
+                    num_samples = int((idx_end-idx_start)*self.d.spf(i)/self.d.spf(self.ref_field))
+
+                    self.data_values[i] = self.d.getdata(i, first_sample=first_sample, num_samples=num_samples)
+
+                len_fields = np.append(len_fields, len(self.data_values[i]))
+
+            if self.ref_field in field_list:
+                self.ref_field_array = self.data_values[self.ref_field]
+            else:
+                self.ref_field_array = self.d.getdata(self.ref_field, first_sample=int(idx_start), \
+                                                      num_samples=int(idx_end-idx_start))
+
+            if np.all(np.diff(len_fields) == 0):
+                self.resample_required = False
+            else:
+                self.resample_required = True
 
     def resample(self, field=None, interpolation_kind='linear'):
 
@@ -206,5 +233,6 @@ class data:
                     dd.add(entry)
 
                 dd.putdata(i, self.data_values[i], (gd.FLOAT32, 1))
+
                 
 

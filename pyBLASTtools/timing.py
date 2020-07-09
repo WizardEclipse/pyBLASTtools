@@ -6,6 +6,7 @@ from scipy import interpolate
 import sys
 
 from . import utils
+from . import data
 
 class Error(Exception):
     """Base class for exceptions in this module."""
@@ -467,7 +468,7 @@ class dirfile_interp():
             else:
                 raise InputError
         except InputError:
-            print('The loading method choosen is not correct. Choose between: idx, time_val, time_array')
+            print('The loading method choosen is not correct. Choose between: idx, idx_roach, time_val, time_array')
             sys.exit(1)
 
         if loading_method.strip().lower() == 'time_array':
@@ -484,6 +485,8 @@ class dirfile_interp():
             roach_time_str = 'ctime_built_roach'+str(int(self.roach_num))
 
             if loading_method.strip().lower() == 'idx_roach':
+
+
                 self.time_roach = self.d_roach.getdata(roach_time_str)
 
                 self.idx_start_roach = idx_start
