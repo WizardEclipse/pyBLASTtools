@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.linalg import svd
 from scipy.optimize import least_squares
-#from photutils import find_peaks
+from photutils import find_peaks
 from astropy.stats import sigma_clipped_stats
 
 def centroid(map_data, pixel1_coord, pixel2_coord, threshold=0.275):
@@ -47,6 +47,12 @@ class beam(object):
 
     def __init__(self, data, param = None):
 
+        '''
+        Class to handle beam operations on a map
+        - data: Map to be analyzed
+        - param: parameter for the gaussian model of a beam
+        '''
+
         self.data = data
         self.param = param
 
@@ -80,7 +86,17 @@ class beam(object):
         index, = np.where(y>=0.2*maxv)
         return (y[index]-dat[index]) / err[index]
 
-    def peak_finder(self, map_data, mask_pf = False):
+    def peak_finder(self, map_data, mask_pf = None):
+
+        '''
+        Function to generate initial parameters of gaussian(s) to be used as guesses in the fitting algorithm.
+        The code is searching automatically for peaks location using astropy and photutils routines. 
+        Parameters:
+        - map_data: map to be searched for gaussian(s)
+        - mask_pf: a mask to be used in the searching algorithm. The alorithm is looking for gaussians only where 
+                   the mask is true. In case of an iterative fitting, the mask is updated everytime to mask out 
+                   the gaussians that have been already found.  
+        '''
 
         x_lim = np.size(self.xgrid)
         y_lim = np.size(self.ygrid)
@@ -90,12 +106,12 @@ class beam(object):
 
         mean, median, std = sigma_clipped_stats(self.data, sigma=3.0)
         threshold = median+(5.*std)
-        if mask_pf is False:
-            #tbl = find_peaks(map_data, threshold, box_size=bs)
+        if mask_pf is None:
+            tbl = find_peaks(map_data, threshold, box_size=bs)
             mask_pf = np.zeros_like(self.xy_mesh[0])
         else:
             self.mask = mask_pf.copy()
-            #tbl = find_peaks(map_data, threshold, box_size=bs, mask = self.mask)
+            tbl = find_peaks(map_data, threshold, box_size=bs, mask = self.mask)
         tbl['peak_value'].info.format = '%.8g'
 
         guess = np.array([])
@@ -122,6 +138,12 @@ class beam(object):
                 self.mask = np.logical_or(self.mask, mask_pf)
 
     def fit(self):
+
+        '''
+        Base function to fit a 2D image.
+        If the method does not converge an error message is returned 
+        '''
+
         try:
             p = least_squares(self.residuals, x0=self.param, \
                               args=(self.xy_mesh, np.ravel(self.data),\
@@ -141,7 +163,18 @@ class beam(object):
             msg = 'Too Many parameters',
             return msg, 0
 
-    def beam_fit(self, mask_pf= False):
+    def beam_fit(self, recursive=False, mask_pf= None, iter_num=5):
+
+        '''
+        Method to fit a beam given a map. 
+        Possible input parameters:
+        - recursive: If True, the code is iteratively searching for peaks after each fit run.
+                     until the number of peaks is equal to zero or the number of iteration is 
+                     larger than the iter_num parameter
+        - mask_pf: a mask to hide some pixel in the algorithm for finding the peaks and so the gaussian.
+                   If None, no mask is applied in the first step of a recursive search
+        - iter_num: The max number of iteration to search for gaussian components       
+        '''
 
         if self.param is not None:
             peak_found = np.size(self.param)/6
@@ -152,24 +185,38 @@ class beam(object):
             peak_found = peak_number_ini
             force_fit = False
 
-        while peak_found > 0:
+        if recursive:
+            iter_count = 0
+            while peak_found > 0:
+                fit_param, var = self.fit()
+                if isinstance(fit_param, str):
+                    msg = 'fit not converged'
+                    break
+                else:
+                    fit_data = self.multivariate_gaussian_2d(fit_param.x).reshape(np.outer(self.ygrid, self.xgrid).shape)
+
+                    if force_fit is False:
+                        res = self.data-fit_data
+
+                        self.peak_finder(map_data=res)
+
+                        peak_number = np.size(self.param)/6
+                        peak_found = peak_number-peak_number_ini
+                        peak_number_ini = peak_number
+                    else:
+                        peak_found = -1
+
+                if iter_count > iter_num:
+                    break
+                
+                iter_count += 1
+                
+        else:
             fit_param, var = self.fit()
             if isinstance(fit_param, str):
                 msg = 'fit not converged'
-                break
             else:
                 fit_data = self.multivariate_gaussian_2d(fit_param.x).reshape(np.outer(self.ygrid, self.xgrid).shape)
-
-                if force_fit is False:
-                    res = self.data-fit_data
-
-                    self.peak_finder(map_data=res)
-
-                    peak_number = np.size(self.param)/6
-                    peak_found = peak_number-peak_number_ini
-                    peak_number_ini = peak_number
-                else:
-                    peak_found = -1
 
         if isinstance(fit_param, str):
             return msg, 0, 0

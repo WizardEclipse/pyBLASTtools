@@ -6,7 +6,7 @@ def read(fname):
 
 setup(
     name = "pyBLASTtools",
-    version = "1.1",
+    version = "1.2",
     author = "BLAST Collaboration",
     description = ("A python package for BLAST-TNG data analysis"),
     packages=find_packages(),

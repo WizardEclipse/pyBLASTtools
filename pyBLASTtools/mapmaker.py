@@ -125,7 +125,6 @@ class mapmaking(object):
             self.rank = 0
             self.nprocs = 1
 
-
     def pointing_matrix_binning(self, param, coord):
         
         idx = np.ravel_multi_index(np.flip(coord.T, axis=0), (self.map_shape_y, self.map_shape_x))
@@ -365,6 +364,22 @@ class mapmaking(object):
                 maps = self.comm.bcast(maps, root=0)
 
         return maps
+
+    def median_maps(self, maps):
+
+        median = {}
+
+        if len(maps) == 1:
+
+            median['I'] = np.median(list(maps.values()), axis=0)
+
+        else:
+
+            median['I'] = np.median(list(maps['I'].values()), axis=0)
+            median['Q'] = np.median(list(maps['Q'].values()), axis=0)
+            median['U'] = np.median(list(maps['U'].values()), axis=0)
+
+        return median
 
     def map_convolve(self, std, map_value):
 

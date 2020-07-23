@@ -23,3 +23,5 @@ v1.0: Reorganization of the mapmaker and pointing libraries
       Add options to return the offset level for a signal from the baseline
 v1.1: MPI implementation of mapmaker algorithm 
       Possibility to generate single or coadded maps if multiple detectors set as input
+v1.2: Added median mapmaker
+      Added non iterative beam fitting 
