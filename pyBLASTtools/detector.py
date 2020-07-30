@@ -650,6 +650,10 @@ class kidsutils:
         - delta_f: size in Hz of the df. Default at 1000
         - idx_shift: index for shifting. Default at 2
         - timestream: detector complex timestream. If not set, it will be used self.Z 
+        - window: number of samples to exclude at the edges to look for the resonance in the sweep. 
+                  If a float, the number of samples to exclude is applied symmetrically at both edges.
+                  Else, the first element is the left edge and the second is the right. The window is the
+                  same for each resonance. Default is a float at 0
         '''
 
         path_to_sweep = kwargs.get('path_to_sweep')
@@ -669,7 +673,7 @@ class kidsutils:
                 s21_f_real = np.zeros_like(s21_f_real_temp.T)
                 s21_f_imag = np.zeros_like(s21_f_imag_temp.T)
 
-                for i in range(len(s21_f_real.T)):
+                for i in range(len(s21_f_real)):
                     s21_real_filt = filterdata(s21_f_real_temp.T[i], cutoff)
                     s21_imag_filt = filterdata(s21_f_imag_temp.T[i], cutoff)
 
@@ -696,6 +700,17 @@ class kidsutils:
 
         delta_f = kwargs.get('df', 1000)
         shift_idx = kwargs.get('shift_idx', 2)
+
+        window = kwargs.get('window', 0.)
+
+        if isinstance(window, float):
+            window = np.rint(window)
+            window = np.array([window, window], dtype=int)
+        else:
+            if isinstance(window, np.ndarray) is False:
+                window = np.array(window, dtype=int)
+            else:
+                window = window
 
         timestream = kwargs.get('timestream')
 
@@ -725,11 +740,11 @@ class kidsutils:
         dIdf_min, dQdf_min, dMag_min = np.zeros(len(dIdf)), np.zeros(len(dIdf)), np.zeros(len(dIdf))
 
         for i in range(np.shape(timestream)[0]):
-            min_idx = np.where(Mag[i]==min(Mag[i]))[0][0]
+            min_idx = np.where(Mag[i][window[0]:-window[1]]==min(Mag[i][window[0]:-window[1]]))[0][0]
             min_indices[i] = min_idx
-            dIdf_min[i] = dIdf[i][min_indices[i]]
-            dQdf_min[i] = dQdf[i][min_indices[i]]
-            dMag_min[i] = dMag[i][min_indices[i]]
+            dIdf_min[i] = dIdf[i][window[0]+min_indices[i]]
+            dQdf_min[i] = dQdf[i][window[0]+min_indices[i]]
+            dMag_min[i] = dMag[i][window[0]+min_indices[i]]
         
         df_x = np.copy((timestream.real.T*dIdf_min + timestream.imag.T*dQdf_min)/dMag_min**2).T
         df_y  = np.copy((timestream.imag.T*dIdf_min - timestream.real.T*dQdf_min)/dMag_min**2).T
