@@ -703,7 +703,7 @@ class kidsutils:
 
         window = kwargs.get('window', 0.)
 
-        if isinstance(window, float):
+        if isinstance(window, float) or isinstance(window, int):
             window = np.rint(window)
             window = np.array([window, window], dtype=int)
         else:
