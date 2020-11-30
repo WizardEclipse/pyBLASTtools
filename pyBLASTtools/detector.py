@@ -803,7 +803,6 @@ class kidsutils:
             else:
                 channel = channel
 
-<<<<<<< Updated upstream
             s21_f = s21_f_real + 1j*s21_f_imag
             dI, dQ = np.diff(s21_f.real), np.diff(s21_f.imag)
             dIdf, dQdf = dI/delta_f, dQ/delta_f
@@ -827,35 +826,6 @@ class kidsutils:
             del dI
             del dQ
             del Mag
-=======
-            dI, dQ = np.diff(s21_f_real[channel]), np.diff(s21_f_imag[channel])
-            Mag = np.sqrt(s21_f_real[channel]**2+s21_f_imag[channel]**2)
-
-        dIdf, dQdf = dI/delta_f, dQ/delta_f 
-
-        dMag = np.sqrt(dIdf**2+dQdf**2)
-        
-        dIdf, dQdf, dMag = np.roll(dIdf,-shift_idx, axis=1), np.roll(dQdf,-shift_idx, axis=1), \
-                           np.roll(dMag,-shift_idx, axis=1)
-
-        min_indices = np.zeros(np.shape(timestream)[0]).astype("int")
-        dIdf_min, dQdf_min, dMag_min = np.zeros(len(dIdf)), np.zeros(len(dIdf)), np.zeros(len(dIdf))
-
-        for i in range(np.shape(timestream)[0]):
-            min_idx = np.where(Mag[i][window[0]:-window[1]]==min(Mag[i][window[0]:-window[1]]))[0][0]
-            min_indices[i] = min_idx
-            dIdf_min[i] = dIdf[i][window[0]+min_indices[i]]
-            dQdf_min[i] = dQdf[i][window[0]+min_indices[i]]
-            dMag_min[i] = dMag[i][window[0]+min_indices[i]]
-        
-        df_x = np.copy((timestream.real.T*dIdf_min + timestream.imag.T*dQdf_min)/dMag_min**2).T
-        df_y  = np.copy((timestream.imag.T*dIdf_min - timestream.real.T*dQdf_min)/dMag_min**2).T
-
-        del dI
-        del dQ
-        del Mag
-        
->>>>>>> Stashed changes
         return df_x, df_y
 
     def despike_sweeps(self, I_targ, Q_targ, std=5, cutoff=0.1):
