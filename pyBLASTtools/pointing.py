@@ -1,6 +1,4 @@
 import numpy as np
-import gc
-from astropy import wcs
 import astropy.units as u
 from astropy.coordinates import EarthLocation, AltAz, FK5, ICRS, SkyCoord
 from astropy.time import Time, core
@@ -150,9 +148,9 @@ class utils(object):
 
         LST = self.time.sidereal_time('mean', longitude=self.location.lon)
         H = (LST - coord.ra).radian
-        q = np.arctan2(np.sin(H),
-                       (np.tan(self.location.lat.radian)*np.cos(coord.dec.radian)-\
-                        np.sin(coord.dec.radian)*np.cos(H)))
+        q = np.arctan2(np.sin(H)*np.cos(self.location.lat.radian),
+                       (np.sin(self.location.lat.radian)*np.cos(coord.dec.radian)-\
+                        np.sin(coord.dec.radian)*np.cos(self.location.lat.radian)*np.cos(H)))
 
         return np.degrees(q) 
 
@@ -201,8 +199,8 @@ class convert_to_telescope():
                   np.cos(np.radians(self.coord2))*np.sin(np.radians(self.crval[1]))*\
                   np.cos(np.radians(self.coord1-self.crval[0])))/den
 
-        x_tel = x_proj*np.cos(self.pa)-y_proj*np.sin(self.pa)
-        y_tel = y_proj*np.cos(self.pa)+x_proj*np.sin(self.pa)
+        x_tel = -(x_proj*np.cos(self.pa)-y_proj*np.sin(self.pa))
+        y_tel = (y_proj*np.cos(self.pa)+x_proj*np.sin(self.pa))
 
         if np.size(np.shape(self.coord1)) == 1:
             x_tel = np.tile(x_tel, (det_num, 1))

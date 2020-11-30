@@ -3,6 +3,7 @@ from scipy.linalg import svd
 from scipy.optimize import least_squares
 from photutils import find_peaks
 from astropy.stats import sigma_clipped_stats
+from lmfit import Parameters, minimize
 
 def centroid(map_data, pixel1_coord, pixel2_coord, threshold=0.275):
 
@@ -25,13 +26,13 @@ def centroid(map_data, pixel1_coord, pixel2_coord, threshold=0.275):
     a = data[gt_inds]
     flux = np.sum(a)
 
-    x_coord_max = np.floor(np.amax(pixel1_coord))+1
-    x_coord_min = np.floor(np.amin(pixel1_coord))
+    x_coord_max = np.rint(np.amax(pixel1_coord))+1
+    x_coord_min = np.rint(np.amin(pixel1_coord))
 
     x_arr = np.arange(x_coord_min, x_coord_max)
 
-    y_coord_max = np.floor(np.amax(pixel2_coord))+1
-    y_coord_min = np.floor(np.amin(pixel2_coord))
+    y_coord_max = np.rint(np.amax(pixel2_coord))+1
+    y_coord_min = np.rint(np.amin(pixel2_coord))
 
     y_arr = np.arange(y_coord_min, y_coord_max)
 
@@ -84,7 +85,7 @@ class beam(object):
     def residuals(self, params, x, y, err, maxv):
         dat = self.multivariate_gaussian_2d(params)
         index, = np.where(y>=0.2*maxv)
-        return (y[index]-dat[index]) / err[index]
+        return (dat[index]-y[index])**2 / err[index]
 
     def peak_finder(self, map_data, mask_pf = None):
 
@@ -137,7 +138,75 @@ class beam(object):
                 self.param = np.append(self.param, guess_temp)
                 self.mask = np.logical_or(self.mask, mask_pf)
 
-    def fit(self):
+
+    def residual_lmfit(self, p):
+
+        params = np.array([])
+
+        v = p.valuesdict()
+
+        for k in v.keys():
+            params = np.append(params, v[k])
+
+        dat = self.multivariate_gaussian_2d(params)
+        y = np.ravel(self.data.copy())
+        return dat-y 
+
+
+    def test_lmfit(self, guess, d=None, method='cg'):
+
+        fit_params = Parameters()
+        fit_params.add('amp', value=guess[0], max=guess[0]*1.2, min=guess[0]*0.8)
+        fit_params.add('xc', value=float(guess[1]), max=guess[1]+20, min=guess[1]-20)
+        fit_params.add('yc', value=float(guess[2]), max=guess[2]+20, min=guess[2]-20)
+        fit_params.add('sigma_x', value=guess[3], max=20.00, min=1.00)
+        fit_params.add('sigma_y', value=guess[4], max=20.00, min=1.00)
+        fit_params.add('theta', value=guess[5], max=2*np.pi, min=0.00)
+
+        if d:
+            values = np.ravel(self.data.copy())
+        else:
+            values = np.ravel(self.data.copy())
+            values[values == 0] = np.nan
+
+        out = minimize(self.residual_lmfit, fit_params, method=method, nan_policy='omit')
+
+        return out
+
+    def create_bounds(self, min_amplitude=0.2, max_amplitude=1.2, window_pixel=20, min_sigma=1, max_sigma=20):
+
+        '''
+        Create bounds for the parameter of the gaussian fitting
+        - min_amplitude: minimum amplitude of the gaussian. The bound is created taking the initial guess and scale 
+                         by this factor
+        - max_amplitude: maximum amplitude of the gaussian. The bound is created taking the initial guess and scale 
+                         by this factor
+        - window_pixel: the number of pixels, left and right, up and down, to look for the the center of the gaussian
+        - min_sigma: the minimum size of the sigma in pixel size (valid for both sigma_x and sigma_y)
+        - max_sigma: the maximum size of the sigma in pixel size (valid for both sigma_x and sigma_y)
+        '''
+
+        lower_bounds = []
+        upper_bounds = []
+
+        for i in range(int(len(self.param)/6)):
+            start_idx = i*6
+            lower_bounds.append(min_amplitude*self.param[start_idx+i])
+            lower_bounds.append(self.param[start_idx+i+1]-window_pixel)
+            lower_bounds.append(self.param[start_idx+i+2]-window_pixel)
+            lower_bounds.append(min_sigma)
+            lower_bounds.append(min_sigma)
+            lower_bounds.append(0.)
+            upper_bounds.append(max_amplitude*self.param[start_idx+i])
+            upper_bounds.append(self.param[start_idx+i+1]+window_pixel)
+            upper_bounds.append(self.param[start_idx+i+2]+window_pixel)
+            upper_bounds.append(max_sigma)
+            upper_bounds.append(max_sigma)
+            upper_bounds.append(2*np.pi)
+
+        self.bounds = (lower_bounds, upper_bounds)
+    
+    def fit(self, bounds=False, min_amplitude=0.2, max_amplitude=1.2, window_pixel=20, min_sigma=1, max_sigma=20):
 
         '''
         Base function to fit a 2D image.
@@ -145,25 +214,33 @@ class beam(object):
         '''
 
         try:
-            p = least_squares(self.residuals, x0=self.param, \
-                              args=(self.xy_mesh, np.ravel(self.data),\
-                                    np.ones(len(np.ravel(self.data))), np.amax(self.data)), \
-                              method='lm')
-            
+            if bounds:
+                self.create_bounds(min_amplitude, max_amplitude, window_pixel, min_sigma, max_sigma)
+                p = least_squares(self.residuals, x0=self.param, \
+                                  args=(self.xy_mesh, np.ravel(self.data),\
+                                        np.ones(len(np.ravel(self.data))), np.amax(self.data)), \
+                                  bounds=self.bounds, method='trf')
+            else:
+                p = least_squares(self.residuals, x0=self.param, \
+                                  args=(self.xy_mesh, np.ravel(self.data),\
+                                        np.ones(len(np.ravel(self.data))), np.amax(self.data)), \
+                                  method='lm')
             _, s, VT = svd(p.jac, full_matrices=False)
             threshold = np.finfo(float).eps * max(p.jac.shape) * s[0]
             s = s[s > threshold]
             VT = VT[:s.size]
             var = np.dot(VT.T / s**2, VT)
+            
             return p, var
         except np.linalg.LinAlgError:
             msg = 'Fit not converged'
             return msg, 0
         except ValueError:
-            msg = 'Too Many parameters',
+            msg = 'Too Many parameters'
             return msg, 0
 
-    def beam_fit(self, recursive=False, mask_pf= None, iter_num=5):
+    def beam_fit(self, recursive=False, mask_pf= None, iter_num=5, \
+                 bounds=False, min_amplitude=0.2, max_amplitude=1.2, window_pixel=20, min_sigma=1, max_sigma=20):
 
         '''
         Method to fit a beam given a map. 
@@ -188,7 +265,7 @@ class beam(object):
         if recursive:
             iter_count = 0
             while peak_found > 0:
-                fit_param, var = self.fit()
+                fit_param, var = self.fit(bounds, min_amplitude, max_amplitude, window_pixel, min_sigma, max_sigma)
                 if isinstance(fit_param, str):
                     msg = 'fit not converged'
                     break
@@ -212,7 +289,7 @@ class beam(object):
                 iter_count += 1
                 
         else:
-            fit_param, var = self.fit()
+            fit_param, var = self.fit(bounds, min_amplitude, max_amplitude, window_pixel, min_sigma, max_sigma)
             if isinstance(fit_param, str):
                 msg = 'fit not converged'
             else:
@@ -221,7 +298,7 @@ class beam(object):
         if isinstance(fit_param, str):
             return msg, 0, 0
         else:
-            return fit_data, fit_param.x, var
+            return fit_data, fit_param, var
         
 
 

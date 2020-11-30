@@ -9,3 +9,4 @@ import pyBLASTtools.plot
 import pyBLASTtools.utils
 import pyBLASTtools.beam
 import pyBLASTtools.data
+import pyBLASTtools.inpainting

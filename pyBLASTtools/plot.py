@@ -4,7 +4,7 @@ import numpy as np
 import pyBLASTtools.mapmaker as mp
 
 
-def plot_map(map_value, projection, idxpixel, title=None, centroid=None, save=False, save_path=None, dpi=250):
+def plot_map(mapval, projection, idxpixel, title=None, centroid=None, centroid_gaussian=None, save=False, save_path=None, dpi=250):
 
     if list(projection.wcs.ctype) == ['RA---TAN', 'DEC--TAN']:
         string_x = 'RA (deg)'
@@ -18,6 +18,10 @@ def plot_map(map_value, projection, idxpixel, title=None, centroid=None, save=Fa
     proj_plot = wcs_proj.reproject(idxpixel)
 
     ax = plt.subplot(projection=proj_plot)
+    
+    map_value = mapval.copy()
+
+    map_value[map_value==0] = np.nan
 
     im = ax.imshow(map_value, origin='lower')
 
@@ -27,6 +31,10 @@ def plot_map(map_value, projection, idxpixel, title=None, centroid=None, save=Fa
         ax.plot(centroid[0]-np.floor(np.amin(idxpixel[:,:,0])), \
                 centroid[1]-np.floor(np.amin(idxpixel[:,:,1])), 'x', \
                 c='red', transform=ax.get_transform('pixel'))
+    
+    if centroid_gaussian is not None:
+        ax.plot(centroid_gaussian[0], centroid_gaussian[1], 'x', \
+                c='black', transform=ax.get_transform('pixel'))
 
     c1 = ax.coords[0]
     

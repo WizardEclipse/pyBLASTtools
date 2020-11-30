@@ -1,5 +1,4 @@
 import pyBLASTtools as pbt
-import glob as gl 
 from itertools import compress
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,11 +7,12 @@ from astropy.table import Table
 
 path = '/data_storage_2/FLIGHT/flight_data'
 
-list_file = gl.glob(path+'/*')
+list_file = os.listdir(path)
 
-master_file = [s for s in list_file  if 'master'  in s]
-master_file = master_file[0]
-roach_file = list(compress(list_file, ['roach' in s for s in list_file]))
+
+master_file = [s for s in list_file  if 'master_2020'  in s]
+master_file = path+'/'+master_file[0]
+roach_file = sorted(list(compress(list_file, ['roach' in s for s in list_file])))
 
 ### Detector Parameters ###
 roach_number = 3
@@ -22,7 +22,7 @@ roach_file_path = path+'/roach3_2020-01-06-06-21-56'
 ### Scan Parameters ###
 time_start = 1578323354+60*4
 time_end = 1578324356+60*3
-time_offset = 0.
+time_offset = 0.04
 
 ### Mask for cal_lamp ###
 idx_mask_start = int(np.floor(414250+time_offset/488.28125))
@@ -32,7 +32,7 @@ d = pbt.timing.dirfile_interp('time_val', path_master=master_file, path_roach=ro
                               time_start=time_start, time_end=time_end, roach_num=str(int(roach_number)), \
                               offset=time_offset)
 
-field_list = ['AZ', 'MC_EL_MOTOR_POS', 'AZ_RAW_DGPS', 'LON', 'LAT', 'ALT']
+field_list = ['AZ', 'MC_EL_MOTOR_POS', 'AZ_RAW_DGPS', 'LON', 'LAT', 'ALT', 'GY_AZ_VEL']
 
 pointing_data = pbt.data.data(master_file, d.idx_start_master, d.idx_end_master, field_list, mode='samples')
 pointing_data.resample()
@@ -41,6 +41,8 @@ pointing_data_resample = pointing_data.data_values
 pointing_data_resample['AZ_RAW_DGPS'] += 270.90
 pointing_data_resample['MC_EL_MOTOR_POS'] += -0.072
 pointing_data_resample['AZ_RAW_DGPS'] -= 360.
+
+sys.exit()
 
 az_nodrift = pbt.utils.remove_drift(pointing_data_resample['AZ'], \
                                     pointing_data_resample['AZ_RAW_DGPS'], 100, 100)
@@ -59,13 +61,15 @@ ra = d.interpolate(master_array=radec[0], fs_master=100)
 dec = d.interpolate(master_array=radec[1], fs_master=100)
 pa = d.interpolate(master_array=pa, fs_master=100)
 
+sys.exit()
+
 t = pbt.pointing.convert_to_telescope(ra, dec, pa=pa)
 radec = t.conversion()
 
 ctype = 'RA and DEC'
 crpix = np.array([50.,50.])
 crval = np.array([np.median(radec[0]), np.median(radec[1])])
-pixel_size = np.array([10./3600., 10./3600.])
+pixel_size = np.array([36./3600., 36./3600.])
 
 wcs = pbt.mapmaker.wcs_world(crpix=crpix, cdelt=pixel_size, crval=crval, telcoord=True)
 proj = wcs.w.deepcopy()
@@ -74,13 +78,13 @@ det = pbt.detector.kidsutils(data_dir=roach_file_path, roach_num=int(roach_numbe
                              single=True, chan=detector_number, first_sample=d.idx_start_roach, \
                              last_sample=d.idx_end_roach)
 
-path_file = os.path.dirname(os.path.abspath(__file__))
-flight_targ = np.load(path_file+'/flight_targ_rel_paths.npy')
-flight_targ = flight_targ.astype("str")
+# path_file = os.path.dirname(os.path.abspath(__file__))
+# flight_targ = np.load(path_file+'/flight_targ_rel_paths.npy')
+# flight_targ = flight_targ.astype("str")
 
-df_x, df_y = det.get_df(path_to_sweep=path+'/'+flight_targ[roach_number-1])
+# df_x, df_y = det.get_df(path_to_sweep=path+'/'+flight_targ[roach_number-1])
 
-df_x = (df_x.T-np.mean(df_x, axis=1)).T
+# df_x = (df_x.T-np.mean(df_x, axis=1)).T
 
 # t = Table.read('det_table.txt', format='ascii')
 
@@ -120,7 +124,24 @@ maps=pbt.mapmaker.mapmaking(final_det, 1., np.zeros(len(final_det)), w, crpix)
 
 maps = maps.binning_map(coadd=False)
 
-pbt.plot.plot_map(maps['I']['det_0'], proj, w)
+# idx = np.where(maps['I']['det_0']==np.amax(maps['I']['det_0']))
+
+# guess_temp = np.array([np.amax(maps['I']['det_0']), idx[1], idx[0], 1., 1., 0.])
+
+
+# map_filled = pbt.inpainting.NearestNeighbours(maps['I']['det_0'])
+# final = map_filled.predict(niter=100)
+
+# bm = pbt.beam.beam(final, param=guess_temp)
+# g = bm.beam_fit()
+
+#pbt.plot.plot_map(maps['I']['det_0'], proj, w)
+
+# maps=pbt.mapmaker.mapmaking(final_det, 1., np.zeros(len(final_det)), w, crpix, convolution=True, std=3, cdelt=pixel_size)
+
+# maps_convolved = maps.binning_map(coadd=False)
+
+#pbt.plot.plot_map(maps['I']['det_0'], proj, w)
 
 # key = maps['I'].keys()
 # count = 0

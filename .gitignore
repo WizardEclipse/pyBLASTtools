@@ -6,3 +6,27 @@ pyBLASTtools/__pycache__/
 #Extensions to ignore
 *.egg-info
 *.pyc
+*.png
+
+#File to ignore
+test/beams_tod/det_000/double/fit_result_double.txt
+test/beams_tod/det_000/single/fit_result_single.txt
+test/beams_tod/det_001/double/fit_result_double.txt
+test/beams_tod/det_001/single/fit_result_single.txt
+test/beams_tod/det_002/double/fit_result_double.txt
+test/beams_tod/det_002/single/fit_result_single.txt
+test/beams_tod/det_003/double/fit_result_double.txt
+test/beams_tod/det_003/single/fit_result_single.txt
+test/beams_tod/det_004/double/fit_result_double.txt
+test/mars_test.py
+test/map.fits
+test/map_350.fits
+test/map_test.py
+test/full.txt
+test/focus.txt
+test/det_571.fits
+test/det_571_ip.fits
+test/comparison.py
+test/beam_fitting_TOD.py
+testresults.txt
+test/beams_tod/det_004/single/fit_result_single.txt
