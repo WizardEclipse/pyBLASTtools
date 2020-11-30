@@ -720,39 +720,58 @@ class kidsutils:
         if single_chan:
             dI, dQ = np.array([np.diff(s21_f_real[channel])]), np.array([np.diff(s21_f_imag[channel])])
             Mag = np.array([np.sqrt(s21_f_real[channel]**2+s21_f_imag[channel]**2)])
+            dIdf, dQdf = dI/delta_f, dQ/delta_f        
+            dMag = np.sqrt(dIdf**2+dQdf**2)
+          
+
+            dIdf, dQdf, dMag = np.roll(dIdf,-shift_idx, axis=1), np.roll(dQdf,-shift_idx, axis=1), \
+                               np.roll(dMag,-shift_idx, axis=1)
+
+            min_indices = np.zeros(np.shape(timestream)[0]).astype("int")
+            dIdf_min, dQdf_min, dMag_min = np.zeros(len(dIdf)), np.zeros(len(dIdf)), np.zeros(len(dIdf))
+            min_idx = np.where(Mag[0]==min(Mag[0]))[0][0]
+            
+            
+            dIdf_min = dIdf[0][min_idx]
+            dQdf_min = dQdf[0][min_idx]
+            dMag_min = dMag[0][min_idx]
+            
+            df_x = (np.copy((timestream.real.T*dIdf_min + timestream.imag.T*dQdf_min)/dMag_min**2).T)[0]
+            df_y = (np.copy((timestream.imag.T*dIdf_min - timestream.real.T*dQdf_min)/dMag_min**2).T)[0]
+
+            del dI
+            del dQ
+            del Mag
+            
         else:
             if isinstance(channel, int) or isinstance(channel, float):
                 channel = int(channel)
             else:
                 channel = channel
 
-            dI, dQ = np.diff(s21_f_real[channel]), np.diff(s21_f_imag[channel])
-            Mag = np.sqrt(s21_f_real[channel]**2+s21_f_imag[channel]**2)
-
-        dIdf, dQdf = dI/delta_f, dQ/delta_f        
-        dMag = np.sqrt(dIdf**2+dQdf**2)
-        
-
-        dIdf, dQdf, dMag = np.roll(dIdf,-shift_idx, axis=1), np.roll(dQdf,-shift_idx, axis=1), \
-                           np.roll(dMag,-shift_idx, axis=1)
-
-        min_indices = np.zeros(np.shape(timestream)[0]).astype("int")
-        dIdf_min, dQdf_min, dMag_min = np.zeros(len(dIdf)), np.zeros(len(dIdf)), np.zeros(len(dIdf))
-
-        for i in range(np.shape(timestream)[0]):
-            min_idx = np.where(Mag[i][window[0]:-window[1]]==min(Mag[i][window[0]:-window[1]]))[0][0]
-            min_indices[i] = min_idx
-            dIdf_min[i] = dIdf[i][window[0]+min_indices[i]]
-            dQdf_min[i] = dQdf[i][window[0]+min_indices[i]]
-            dMag_min[i] = dMag[i][window[0]+min_indices[i]]
-        
-        df_x = np.copy((timestream.real.T*dIdf_min + timestream.imag.T*dQdf_min)/dMag_min**2).T
-        df_y  = np.copy((timestream.imag.T*dIdf_min - timestream.real.T*dQdf_min)/dMag_min**2).T
-
-        del dI
-        del dQ
-        del Mag
-        
+            s21_f = s21_f_real + 1j*s21_f_imag
+            dI, dQ = np.diff(s21_f.real), np.diff(s21_f.imag)
+            dIdf, dQdf = dI/delta_f, dQ/delta_f
+            Mag = np.sqrt(s21_f.real**2+s21_f.imag**2)
+            Mag = np.delete(Mag,len(Mag[0])-1,1)
+            dMag = np.sqrt(dIdf**2+dQdf**2)
+            # roll by shift_idx
+            dIdf, dQdf, dMag = np.roll(dIdf,-shift_idx), np.roll(dQdf,-shift_idx), np.roll(dMag,-shift_idx)
+            # Find max/min for each channel
+            min_indices, max_indices = np.zeros(channel).astype("int"), np.zeros(channel).astype("int")
+            dIdf_min, dQdf_min, dMag_min = np.zeros(len(dIdf)), np.zeros(len(dIdf)), np.zeros(len(dIdf))
+            for i in range(channel):
+              min_idx = np.where(Mag[i]==min(Mag[i]))[0][0]
+              min_indices[i] = min_idx
+              dIdf_min[i] = dIdf[i][min_indices[i]]
+              dQdf_min[i] = dQdf[i][min_indices[i]]
+              dMag_min[i] = dMag[i][min_indices[i]]
+            I, Q = timestream.real, timestream.imag
+            df_x = np.copy((I.T*dIdf_min + Q.T*dQdf_min)/dMag_min**2).T
+            df_y  = np.copy((Q.T*dIdf_min - I.T*dQdf_min)/dMag_min**2).T
+            del dI
+            del dQ
+            del Mag
         return df_x, df_y
 
     def despike_sweeps(self, I_targ, Q_targ, std=5, cutoff=0.1):
