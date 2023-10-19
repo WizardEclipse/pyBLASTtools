@@ -171,7 +171,8 @@ class timing():
             else:
                 mode_dirfile = gd.RDONLY
 
-            self.d = gd.dirfile(self.roach_path[roach_number_temp-1], mode_dirfile)
+            #self.d = gd.dirfile(self.roach_path[roach_number_temp-1], mode_dirfile)
+            self.d = gd.dirfile(self.roach_path[roach_number_temp], mode_dirfile)
             ctime_roach_name = 'ctime_roach'+str(int(roach_number_temp))
             self.ctime_roach_temp = (self.d.getdata(ctime_roach_name)).astype(np.float64)
 
